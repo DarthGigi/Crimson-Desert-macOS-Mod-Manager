@@ -1,8 +1,10 @@
 use std::collections::{BTreeMap, BTreeSet};
 use std::fs;
+use std::io;
 use std::path::{Path, PathBuf};
 
 use serde_json::Value;
+use zip::read::ZipArchive;
 
 use crate::db;
 use crate::error::{AppError, AppResult};
@@ -130,6 +132,31 @@ pub fn scan_mod_folder(folder: &Path, packages_dir: Option<&Path>) -> AppResult<
     }
 
     Ok(results)
+}
+
+pub fn scan_import_source(
+    source: &Path,
+    packages_dir: Option<&Path>,
+    app_data_dir: &Path,
+) -> AppResult<Vec<ScanResult>> {
+    if source.is_dir() {
+        return scan_mod_folder(source, packages_dir);
+    }
+
+    let extension = source
+        .extension()
+        .and_then(|value| value.to_str())
+        .map(|value| value.to_ascii_lowercase())
+        .unwrap_or_default();
+    if extension != "zip" {
+        return Err(AppError::InvalidMod(format!(
+            "Unsupported import source: {}",
+            source.display()
+        )));
+    }
+
+    let extracted_root = extract_zip_to_cache(source, app_data_dir)?;
+    scan_mod_folder(&extracted_root, packages_dir)
 }
 
 pub fn detect_import_kind(path: &Path) -> AppResult<ModKind> {
@@ -694,6 +721,43 @@ fn copy_dir_all(source: &Path, destination: &Path) -> AppResult<()> {
     Ok(())
 }
 
+fn extract_zip_to_cache(source: &Path, app_data_dir: &Path) -> AppResult<PathBuf> {
+    let cache_root = app_data_dir.join("mods").join("import-cache");
+    fs::create_dir_all(&cache_root)?;
+
+    let cache_dir = cache_root.join(unique_id("zip"));
+    fs::create_dir_all(&cache_dir)?;
+
+    let archive_file = fs::File::open(source)?;
+    let mut archive = ZipArchive::new(archive_file)
+        .map_err(|err| AppError::InvalidMod(format!("Invalid zip archive {}: {err}", source.display())))?;
+
+    for index in 0..archive.len() {
+        let mut entry = archive
+            .by_index(index)
+            .map_err(|err| AppError::InvalidMod(format!("Could not read zip entry: {err}")))?;
+
+        let Some(relative) = entry.enclosed_name().map(|path| path.to_path_buf()) else {
+            continue;
+        };
+        let out_path = cache_dir.join(relative);
+
+        if entry.is_dir() {
+            fs::create_dir_all(&out_path)?;
+            continue;
+        }
+
+        if let Some(parent) = out_path.parent() {
+            fs::create_dir_all(parent)?;
+        }
+
+        let mut output = fs::File::create(&out_path)?;
+        io::copy(&mut entry, &mut output)?;
+    }
+
+    Ok(cache_dir)
+}
+
 pub fn merged_changes(
     enabled_mods: &[(ModRecord, ModManifest)],
 ) -> BTreeMap<PatchTarget, Vec<(String, ModChange)>> {
@@ -745,7 +809,13 @@ fn patch_title(patch: &ModPatch) -> String {
 
 #[cfg(test)]
 mod tests {
+    use std::fs::File;
+    use std::io::Write;
+    use std::time::{SystemTime, UNIX_EPOCH};
+
     use super::*;
+    use zip::write::SimpleFileOptions;
+    use zip::ZipWriter;
 
     const DOWNLOADED_MODS_DIR: &str = "/Users/gigi/Downloads/CD Mods";
 
@@ -786,5 +856,50 @@ mod tests {
         assert_eq!(record.name, "Better Inventory UI compatible with BTM");
         assert!(record.target_files.iter().any(|group| group == "0012"));
         assert!(record.change_count > 0);
+    }
+
+    #[test]
+    fn scans_zip_archive_and_finds_browser_raw_mod() {
+        let browser_raw_mod = Path::new(DOWNLOADED_MODS_DIR).join("Better_Inventory_UI_Compatible");
+        let temp_root = std::env::temp_dir().join(format!(
+            "cdmm_zip_scan_{}",
+            SystemTime::now()
+                .duration_since(UNIX_EPOCH)
+                .unwrap_or_default()
+                .as_nanos()
+        ));
+        fs::create_dir_all(&temp_root).unwrap();
+        let zip_path = temp_root.join("browser_raw.zip");
+
+        let file = File::create(&zip_path).unwrap();
+        let mut zip = ZipWriter::new(file);
+        add_dir_to_zip(&browser_raw_mod, &browser_raw_mod, &mut zip).unwrap();
+        zip.finish().unwrap();
+
+        let results = scan_import_source(&zip_path, None, &temp_root).unwrap();
+        assert!(results.iter().any(|result| {
+            result.mod_kind == ModKind::BrowserRaw && result.name == "Better Inventory UI compatible with BTM"
+        }));
+
+        let _ = fs::remove_dir_all(&temp_root);
+    }
+
+    fn add_dir_to_zip(root: &Path, current: &Path, zip: &mut ZipWriter<File>) -> AppResult<()> {
+        for entry in fs::read_dir(current)? {
+            let entry = entry?;
+            let path = entry.path();
+            if path.is_dir() {
+                add_dir_to_zip(root, &path, zip)?;
+                continue;
+            }
+
+            let relative = path.strip_prefix(root).unwrap().to_string_lossy().replace('\\', "/");
+            zip.start_file(relative, SimpleFileOptions::default())
+                .map_err(|err| AppError::Other(format!("Could not add file to zip: {err}")))?;
+            zip.write_all(&fs::read(&path)?)
+                .map_err(|err| AppError::Other(format!("Could not write file to zip: {err}")))?;
+        }
+
+        Ok(())
     }
 }

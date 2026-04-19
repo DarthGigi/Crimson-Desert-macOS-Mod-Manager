@@ -257,6 +257,21 @@
 		}
 	}
 
+	async function chooseModZip() {
+		const selected = await open({
+			multiple: false,
+			directory: false,
+			filters: [{ name: 'ZIP archives', extensions: ['zip'] }],
+			defaultPath: scanFolderPath || undefined,
+			title: 'Choose a ZIP archive containing Crimson Desert mods'
+		});
+
+		if (typeof selected === 'string') {
+			scanFolderPath = selected;
+			await scanFolder(selected);
+		}
+	}
+
 	async function scanFolder(path: string) {
 		busy.scanningMods = true;
 		clearMessage();
@@ -517,13 +532,19 @@
 			<Card.Root>
 				<Card.Header>
 					<Card.Title class="flex items-center gap-2"><HardDriveDownload class="size-5" /> Import from folder</Card.Title>
-					<Card.Description>Scan recursively for `.json` and `.modpatch` variants, then import exactly one file at a time.</Card.Description>
+					<Card.Description>Scan a folder or ZIP archive for JSON, precompiled, and browser/raw variants, then import exactly one candidate at a time.</Card.Description>
 				</Card.Header>
 				<Card.Content class="space-y-4">
-					<Button class="w-full sm:w-auto" disabled={busy.scanningMods} onclick={chooseModFolder}>
-						<FolderSearch class="size-4" />
-						{busy.scanningMods ? 'Scanning folder...' : 'Choose mod folder'}
-					</Button>
+					<div class="flex flex-wrap gap-2">
+						<Button class="w-full sm:w-auto" disabled={busy.scanningMods} onclick={chooseModFolder}>
+							<FolderSearch class="size-4" />
+							{busy.scanningMods ? 'Scanning folder...' : 'Choose mod folder'}
+						</Button>
+						<Button class="w-full sm:w-auto" variant="outline" disabled={busy.scanningMods} onclick={chooseModZip}>
+							<Archive class="size-4" />
+							{busy.scanningMods ? 'Scanning archive...' : 'Choose ZIP archive'}
+						</Button>
+					</div>
 
 					{#if scanFolderPath}
 						<p class="text-muted-foreground text-sm break-all">{scanFolderPath}</p>

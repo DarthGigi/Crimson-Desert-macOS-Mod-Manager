@@ -147,7 +147,7 @@ fn scan_mod_folder_command(
 ) -> Result<Vec<ScanResult>, ErrorPayload> {
     let connection = state.connection().map_err(ErrorPayload::from)?;
     let packages_dir = saved_game_path(&connection).map_err(ErrorPayload::from)?;
-    mods::scan_mod_folder(Path::new(&folder_path), packages_dir.as_deref())
+    mods::scan_import_source(Path::new(&folder_path), packages_dir.as_deref(), &state.app_data_dir)
         .map_err(ErrorPayload::from)
 }
 

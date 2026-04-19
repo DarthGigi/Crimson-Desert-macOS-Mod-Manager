@@ -25,3 +25,4 @@ rusqlite = { version = "0.39.0", features = ["bundled"] }
 lz4_flex = "0.13.0"
 thiserror = "2.0.18"
 tauri-plugin-dialog = "2.7.0"
+zip = { version = "2.2.2", default-features = false, features = ["deflate"] }

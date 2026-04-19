@@ -17,6 +17,7 @@ pub fn database_path(app_data_dir: &Path) -> PathBuf {
 pub fn ensure_app_dirs(app_data_dir: &Path) -> AppResult<()> {
     fs::create_dir_all(app_data_dir)?;
     fs::create_dir_all(app_data_dir.join("mods").join("library"))?;
+    fs::create_dir_all(app_data_dir.join("mods").join("import-cache"))?;
     Ok(())
 }
 
