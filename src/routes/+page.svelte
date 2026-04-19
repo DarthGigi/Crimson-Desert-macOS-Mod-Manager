@@ -1,156 +1,701 @@
 <script lang="ts">
-  import { invoke } from "@tauri-apps/api/core";
+	import { onMount } from 'svelte';
+	import { open } from '@tauri-apps/plugin-dialog';
+	import { toast } from 'svelte-sonner';
+	import {
+		AlertCircle,
+		Archive,
+		ArrowDownUp,
+		CheckCircle2,
+		FolderSearch,
+		Gamepad2,
+		Globe2,
+		HardDriveDownload,
+		Info,
+		Layers3,
+		Package,
+		RefreshCcw,
+		ShieldAlert,
+		Sparkles,
+		Wrench
+	} from '@lucide/svelte';
+	import {
+		applyMods,
+		detectGameInstall,
+		getDashboard,
+		importModVariant,
+		launchGame,
+		resetActiveMods,
+		restoreVanilla,
+		scanModFolder,
+		setGameInstall,
+		setModEnabled,
+		type ApplyResult,
+		type DashboardData,
+		type ModRecord,
+		type ScanResult
+	} from '$lib/desktop-api';
+	import { Badge } from '$lib/components/ui/badge';
+	import { Button } from '$lib/components/ui/button';
+	import * as Card from '$lib/components/ui/card';
+	import { Input } from '$lib/components/ui/input';
+	import { Label } from '$lib/components/ui/label';
+	import * as Table from '$lib/components/ui/table';
+	import * as Alert from '$lib/components/ui/alert';
+	import * as ScrollArea from '$lib/components/ui/scroll-area';
+	import * as Empty from '$lib/components/ui/empty';
+	import * as Collapsible from '$lib/components/ui/collapsible';
+	import * as AlertDialog from '$lib/components/ui/alert-dialog';
+	import { Separator } from '$lib/components/ui/separator';
 
-  let name = $state("");
-  let greetMsg = $state("");
+	type Filter = 'all' | 'enabled' | 'disabled';
+	type Message = {
+		kind: 'error' | 'success' | 'info';
+		title: string;
+		message: string;
+	};
 
-  async function greet(event: Event) {
-    event.preventDefault();
-    // Learn more about Tauri commands at https://tauri.app/develop/calling-rust/
-    greetMsg = await invoke("greet", { name });
-  }
+	let dashboard = $state<DashboardData | null>(null);
+	let scanResults = $state<ScanResult[]>([]);
+	let lastApplyResult = $state<ApplyResult | null>(null);
+	let gamePathInput = $state('');
+	let scanFolderPath = $state('');
+	let search = $state('');
+	let filter = $state<Filter>('all');
+	let message = $state<Message | null>(null);
+	let resetDialogOpen = $state(false);
+	let scanDetailsOpen = $state<Record<string, boolean>>({});
+	let busy = $state({
+		boot: true,
+		detectingGame: false,
+		settingGame: false,
+		scanningMods: false,
+		importing: false,
+		applying: false,
+		restoring: false,
+		resetting: false,
+		launching: false,
+		toggling: ''
+	});
+
+	const allMods = $derived(dashboard?.available ?? []);
+	const install = $derived(dashboard?.status.gameInstall ?? null);
+	const overlayActive = $derived(dashboard?.status.overlayActive ?? false);
+	const backupExists = $derived(dashboard?.status.backupExists ?? false);
+	const enabledCount = $derived(dashboard?.status.enabledMods ?? 0);
+	const totalCount = $derived(dashboard?.status.totalMods ?? 0);
+	const disabledCount = $derived(dashboard?.status.disabledMods ?? 0);
+	const filteredMods = $derived.by(() => {
+		const query = search.trim().toLowerCase();
+
+		return allMods.filter((mod) => {
+			const matchesFilter =
+				filter === 'all' || (filter === 'enabled' ? mod.enabled : !mod.enabled);
+			const haystack = [mod.name, mod.fileName, mod.description ?? '', mod.targetFiles.join(' ')]
+				.join(' ')
+				.toLowerCase();
+			const matchesSearch = !query || haystack.includes(query);
+			return matchesFilter && matchesSearch;
+		});
+	});
+
+	onMount(() => {
+		void refreshDashboard();
+	});
+
+	async function refreshDashboard() {
+		busy.boot = true;
+		try {
+			dashboard = await getDashboard();
+			gamePathInput = dashboard.status.gameInstall?.packagesPath ?? gamePathInput;
+		} catch (error) {
+			setError(error, 'Could not load the mod manager dashboard');
+		} finally {
+			busy.boot = false;
+		}
+	}
+
+	async function chooseGamePath() {
+		const selected = await open({
+			multiple: false,
+			directory: true,
+			defaultPath: gamePathInput || '/Applications',
+			title: 'Choose Crimson Desert.app or packages directory'
+		});
+
+		if (typeof selected === 'string') {
+			gamePathInput = selected;
+		}
+	}
+
+	async function detectInstall() {
+		busy.detectingGame = true;
+		clearMessage();
+		try {
+			const detected = await detectGameInstall();
+			if (!detected) {
+				message = {
+					kind: 'info',
+					title: 'No auto-detected install',
+					message: 'Pick the Crimson Desert.app bundle or the packages directory manually.'
+				};
+				toast.info('No Crimson Desert install was auto-detected.');
+				return;
+			}
+
+			gamePathInput = detected.packagesPath;
+			await refreshDashboard();
+			toast.success('Detected and saved the current Crimson Desert install.');
+		} catch (error) {
+			setError(error, 'Could not auto-detect the game install');
+		} finally {
+			busy.detectingGame = false;
+		}
+	}
+
+	async function saveGamePath() {
+		if (!gamePathInput.trim()) {
+			message = {
+				kind: 'info',
+				title: 'Game path required',
+				message: 'Choose a Crimson Desert.app bundle or packages directory first.'
+			};
+			toast.info('Pick a game path first.');
+			return;
+		}
+
+		busy.settingGame = true;
+		clearMessage();
+		try {
+			const savedInstall = await setGameInstall(gamePathInput.trim());
+			gamePathInput = savedInstall.packagesPath;
+			await refreshDashboard();
+			toast.success('Saved the game install path.');
+		} catch (error) {
+			setError(error, 'Could not save the game install path');
+		} finally {
+			busy.settingGame = false;
+		}
+	}
+
+	async function chooseModFolder() {
+		const selected = await open({
+			multiple: false,
+			directory: true,
+			defaultPath: scanFolderPath || undefined,
+			title: 'Choose a folder containing JSON or .modpatch files'
+		});
+
+		if (typeof selected === 'string') {
+			scanFolderPath = selected;
+			await scanFolder(selected);
+		}
+	}
+
+	async function scanFolder(path: string) {
+		busy.scanningMods = true;
+		clearMessage();
+		try {
+			scanResults = await scanModFolder(path);
+			if (scanResults.length === 0) {
+				message = {
+					kind: 'info',
+					title: 'No modpatches found',
+					message: 'The selected folder does not contain valid .json or .modpatch variants.'
+				};
+				toast.info('No valid modpatch files were found in that folder.');
+				return;
+			}
+
+			toast.success(`Found ${scanResults.length} importable mod variant(s).`);
+		} catch (error) {
+			setError(error, 'Could not scan the selected folder');
+		} finally {
+			busy.scanningMods = false;
+		}
+	}
+
+	async function importScanResult(result: ScanResult) {
+		busy.importing = true;
+		clearMessage();
+		try {
+			dashboard = await importModVariant(result.path, true);
+			lastApplyResult = null;
+			toast.success(`Imported ${result.fileName}.`);
+		} catch (error) {
+			setError(error, `Could not import ${result.fileName}`);
+		} finally {
+			busy.importing = false;
+		}
+	}
+
+	async function toggleMod(mod: ModRecord) {
+		busy.toggling = mod.id;
+		clearMessage();
+		try {
+			dashboard = await setModEnabled(mod.id, !mod.enabled);
+			toast.success(`${mod.name} ${mod.enabled ? 'disabled' : 'enabled'}.`);
+		} catch (error) {
+			setError(error, `Could not update ${mod.name}`);
+		} finally {
+			busy.toggling = '';
+		}
+	}
+
+	async function runApply() {
+		busy.applying = true;
+		clearMessage();
+		try {
+			lastApplyResult = await applyMods();
+			await refreshDashboard();
+			toast.success(lastApplyResult.message);
+		} catch (error) {
+			setError(error, 'Could not apply the enabled mods');
+		} finally {
+			busy.applying = false;
+		}
+	}
+
+	async function runRestore() {
+		busy.restoring = true;
+		clearMessage();
+		try {
+			dashboard = await restoreVanilla();
+			lastApplyResult = null;
+			toast.success('Restored the game overlay to vanilla.');
+		} catch (error) {
+			setError(error, 'Could not restore the vanilla overlay');
+		} finally {
+			busy.restoring = false;
+		}
+	}
+
+	async function runReset() {
+		busy.resetting = true;
+		clearMessage();
+		try {
+			dashboard = await resetActiveMods();
+			lastApplyResult = null;
+			resetDialogOpen = false;
+			toast.success('Disabled every active mod and restored vanilla files.');
+		} catch (error) {
+			setError(error, 'Could not reset the active mod set');
+		} finally {
+			busy.resetting = false;
+		}
+	}
+
+	async function runLaunch() {
+		busy.launching = true;
+		clearMessage();
+		try {
+			await launchGame();
+			toast.success('Launching Crimson Desert.');
+		} catch (error) {
+			setError(error, 'Could not launch the game');
+		} finally {
+			busy.launching = false;
+		}
+	}
+
+	function clearMessage() {
+		message = null;
+	}
+
+	function setError(error: unknown, title: string) {
+		const details = toMessage(error);
+		message = { kind: 'error', title, message: details };
+		toast.error(title, { description: details });
+	}
+
+	function toMessage(error: unknown) {
+		if (typeof error === 'string') return error;
+		if (typeof error === 'object' && error && 'message' in error && typeof error.message === 'string') {
+			return error.message;
+		}
+		return 'Something went wrong.';
+	}
+
+	function formatTimestamp(value: string) {
+		const seconds = Number(value);
+		if (!Number.isFinite(seconds) || seconds <= 0) {
+			return 'Unknown';
+		}
+
+		return new Date(seconds * 1000).toLocaleString();
+	}
+
+	function modActionLabel(mod: ModRecord) {
+		if (busy.toggling === mod.id) return 'Saving...';
+		return mod.enabled ? 'Disable' : 'Enable';
+	}
 </script>
 
-<main class="container">
-  <h1>Welcome to Tauri + Svelte</h1>
+<svelte:head>
+	<title>Crimson Desert Mod Manager</title>
+</svelte:head>
 
-  <div class="row">
-    <a href="https://vite.dev" target="_blank">
-      <img src="/vite.svg" class="logo vite" alt="Vite Logo" />
-    </a>
-    <a href="https://tauri.app" target="_blank">
-      <img src="/tauri.svg" class="logo tauri" alt="Tauri Logo" />
-    </a>
-    <a href="https://svelte.dev" target="_blank">
-      <img src="/svelte.svg" class="logo svelte-kit" alt="SvelteKit Logo" />
-    </a>
-  </div>
-  <p>Click on the Tauri, Vite, and SvelteKit logos to learn more.</p>
+<AlertDialog.Root bind:open={resetDialogOpen}>
+	<div class="mx-auto flex min-h-full w-full max-w-5xl flex-col gap-6 px-4 py-6 sm:px-6 lg:px-8 lg:py-8">
+		<section id="overview" class="scroll-mt-24 space-y-4">
+			<div class="space-y-2">
+				<p class="text-muted-foreground text-xs font-medium uppercase tracking-[0.24em]">Overview</p>
+				<h1 class="text-3xl font-semibold tracking-tight sm:text-4xl">Mod workbench for the macOS build</h1>
+				<p class="text-muted-foreground max-w-3xl text-sm leading-7 sm:text-base">
+					The shell now reflects the real tool direction: sidebar-driven navigation, one-column workflow, and dedicated lanes for data mods,
+					precompiled overlays, language targeting, and advanced format tooling.
+				</p>
+			</div>
 
-  <form class="row" onsubmit={greet}>
-    <input id="greet-input" placeholder="Enter a name..." bind:value={name} />
-    <button type="submit">Greet</button>
-  </form>
-  <p>{greetMsg}</p>
-</main>
+			<div class="flex flex-wrap gap-2">
+				<Badge variant="outline">{totalCount} in library</Badge>
+				<Badge>{enabledCount} enabled</Badge>
+				<Badge variant="secondary">{disabledCount} archived</Badge>
+				<Badge variant={overlayActive ? 'default' : 'outline'}>{overlayActive ? 'Overlay active' : 'Vanilla'}</Badge>
+				<Badge variant={backupExists ? 'outline' : 'secondary'}>{backupExists ? 'Backup present' : 'No backup yet'}</Badge>
+			</div>
 
-<style>
-.logo.vite:hover {
-  filter: drop-shadow(0 0 2em #747bff);
-}
+			{#if message}
+				<Alert.Root variant={message.kind === 'error' ? 'destructive' : 'default'}>
+					<AlertCircle class="size-4" />
+					<Alert.Title>{message.title}</Alert.Title>
+					<Alert.Description>{message.message}</Alert.Description>
+				</Alert.Root>
+			{/if}
 
-.logo.svelte-kit:hover {
-  filter: drop-shadow(0 0 2em #ff3e00);
-}
+			<Card.Root>
+				<Card.Header>
+					<Card.Title class="flex items-center gap-2"><Sparkles class="size-5" /> Current direction</Card.Title>
+					<Card.Description>
+						The backend already handles JSON import and overlay application. The next implementation passes will add dynamic numeric group
+						management, load order, precompiled overlays, and language-targeted installs.
+					</Card.Description>
+				</Card.Header>
+			</Card.Root>
+		</section>
 
-:root {
-  font-family: Inter, Avenir, Helvetica, Arial, sans-serif;
-  font-size: 16px;
-  line-height: 24px;
-  font-weight: 400;
+		<section id="data-mods" class="scroll-mt-24 space-y-4">
+			<div class="space-y-2">
+				<p class="text-muted-foreground text-xs font-medium uppercase tracking-[0.24em]">Data Mods</p>
+				<h2 class="text-2xl font-semibold tracking-tight">JSON mod workflow</h2>
+				<p class="text-muted-foreground max-w-3xl text-sm leading-7">
+					Entry-based JSON mods live here. The current pass supports scanning, importing, enabling, and applying them; load order and overlap
+					intelligence are the next backend milestone.
+				</p>
+			</div>
 
-  color: #0f0f0f;
-  background-color: #f6f6f6;
+			<Card.Root>
+				<Card.Header>
+					<Card.Title class="flex items-center gap-2"><HardDriveDownload class="size-5" /> Import from folder</Card.Title>
+					<Card.Description>Scan recursively for `.json` and `.modpatch` variants, then import exactly one file at a time.</Card.Description>
+				</Card.Header>
+				<Card.Content class="space-y-4">
+					<Button class="w-full sm:w-auto" disabled={busy.scanningMods} onclick={chooseModFolder}>
+						<FolderSearch class="size-4" />
+						{busy.scanningMods ? 'Scanning folder...' : 'Choose mod folder'}
+					</Button>
 
-  font-synthesis: none;
-  text-rendering: optimizeLegibility;
-  -webkit-font-smoothing: antialiased;
-  -moz-osx-font-smoothing: grayscale;
-  -webkit-text-size-adjust: 100%;
-}
+					{#if scanFolderPath}
+						<p class="text-muted-foreground text-sm break-all">{scanFolderPath}</p>
+					{/if}
 
-.container {
-  margin: 0;
-  padding-top: 10vh;
-  display: flex;
-  flex-direction: column;
-  justify-content: center;
-  text-align: center;
-}
+					{#if scanResults.length === 0}
+						<Empty.Root class="min-h-44 border-dashed bg-muted/20 p-8">
+							<Empty.Header>
+								<Empty.Title>No scanned variants yet</Empty.Title>
+								<Empty.Description>Choose a folder to preview compatible JSON mod variants.</Empty.Description>
+							</Empty.Header>
+						</Empty.Root>
+					{:else}
+						<ScrollArea.Root class="h-96 rounded-xl border">
+							<div class="space-y-3 p-3">
+								{#each scanResults as result (result.path)}
+									<Collapsible.Root open={Boolean(scanDetailsOpen[result.path])} class="rounded-xl border bg-muted/20 px-4 py-4">
+										<div class="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
+											<div class="space-y-2">
+												<p class="font-medium">{result.name}</p>
+												<p class="text-muted-foreground text-sm">{result.fileName}</p>
+												<div class="flex flex-wrap gap-2">
+													<Badge variant="outline">{result.patchCount} patch groups</Badge>
+													<Badge variant="outline">{result.changeCount} byte changes</Badge>
+													<Badge variant={result.missingFiles.length === 0 ? 'default' : 'secondary'}>
+														{result.resolvableFiles}/{result.targetFiles.length} resolvable
+													</Badge>
+												</div>
+											</div>
+											<div class="flex gap-2">
+												<Button variant="outline" size="sm" onclick={() => (scanDetailsOpen[result.path] = !scanDetailsOpen[result.path])}>
+													{scanDetailsOpen[result.path] ? 'Hide details' : 'Details'}
+												</Button>
+												<Button size="sm" disabled={busy.importing} onclick={() => importScanResult(result)}>Import</Button>
+											</div>
+										</div>
 
-.logo {
-  height: 6em;
-  padding: 1.5em;
-  will-change: filter;
-  transition: 0.75s;
-}
+										<Collapsible.Content class="pt-4">
+											<Separator class="mb-4" />
+											{#if result.description}
+												<p class="text-muted-foreground text-sm leading-6">{result.description}</p>
+											{/if}
+											<div class="mt-4 flex flex-wrap gap-2">
+												{#each result.targetFiles as target (target)}
+													<Badge variant="outline">{target}</Badge>
+												{/each}
+											</div>
+											{#if result.missingFiles.length > 0}
+												<Alert.Root variant="destructive" class="mt-4">
+													<ShieldAlert class="size-4" />
+													<Alert.Title>Missing target files</Alert.Title>
+													<Alert.Description>{result.missingFiles.join(', ')}</Alert.Description>
+												</Alert.Root>
+											{/if}
+										</Collapsible.Content>
+									</Collapsible.Root>
+								{/each}
+							</div>
+						</ScrollArea.Root>
+					{/if}
+				</Card.Content>
+			</Card.Root>
 
-.logo.tauri:hover {
-  filter: drop-shadow(0 0 2em #24c8db);
-}
+			<Card.Root>
+				<Card.Header>
+					<Card.Title class="flex items-center gap-2"><ArrowDownUp class="size-5" /> Load order and overlap</Card.Title>
+					<Card.Description>
+						The UI shell is ready for a proper load-order section. Backend support for entry-level overlap and “lower wins” behavior is the next pass.
+					</Card.Description>
+				</Card.Header>
+				<Card.Content>
+					<Alert.Root>
+						<Info class="size-4" />
+						<Alert.Title>Next implementation step</Alert.Title>
+						<Alert.Description>
+							Persist load order, report overlaps informatively, and merge JSON changes at the entry level rather than treating file matches as global conflicts.
+						</Alert.Description>
+					</Alert.Root>
+				</Card.Content>
+			</Card.Root>
+		</section>
 
-.row {
-  display: flex;
-  justify-content: center;
-}
+		<section id="language-mods" class="scroll-mt-24 space-y-4">
+			<div class="space-y-2">
+				<p class="text-muted-foreground text-xs font-medium uppercase tracking-[0.24em]">Language Mods</p>
+				<h2 class="text-2xl font-semibold tracking-tight">Language-targeted overlays</h2>
+			</div>
+			<Card.Root>
+				<Card.Header>
+					<Card.Title class="flex items-center gap-2"><Globe2 class="size-5" /> Planned language lane</Card.Title>
+					<Card.Description>
+						Language mods will be separated from data mods and targeted to the selected in-game language rather than the generic data-mod flow.
+					</Card.Description>
+				</Card.Header>
+			</Card.Root>
+		</section>
 
-a {
-  font-weight: 500;
-  color: #646cff;
-  text-decoration: inherit;
-}
+		<section id="precompiled-mods" class="scroll-mt-24 space-y-4">
+			<div class="space-y-2">
+				<p class="text-muted-foreground text-xs font-medium uppercase tracking-[0.24em]">Precompiled Mods</p>
+				<h2 class="text-2xl font-semibold tracking-tight">Folder-based precompiled overlays</h2>
+			</div>
+			<Card.Root>
+				<Card.Header>
+					<Card.Title class="flex items-center gap-2"><Package class="size-5" /> Planned precompiled support</Card.Title>
+					<Card.Description>
+						This lane will handle mods that already ship numeric folders and `meta`, separate from JSON compilation.
+					</Card.Description>
+				</Card.Header>
+			</Card.Root>
+		</section>
 
-a:hover {
-  color: #535bf2;
-}
+		<section id="library" class="scroll-mt-24 space-y-4">
+			<div class="space-y-2">
+				<p class="text-muted-foreground text-xs font-medium uppercase tracking-[0.24em]">Library</p>
+				<h2 class="text-2xl font-semibold tracking-tight">Archive-first mod inventory</h2>
+			</div>
 
-h1 {
-  text-align: center;
-}
+			<div class="space-y-2">
+				<Label for="mod-search">Search library</Label>
+				<Input id="mod-search" bind:value={search} placeholder="Search names, files, and target paths" />
+			</div>
 
-input,
-button {
-  border-radius: 8px;
-  border: 1px solid transparent;
-  padding: 0.6em 1.2em;
-  font-size: 1em;
-  font-weight: 500;
-  font-family: inherit;
-  color: #0f0f0f;
-  background-color: #ffffff;
-  transition: border-color 0.25s;
-  box-shadow: 0 2px 2px rgba(0, 0, 0, 0.2);
-}
+			<div class="flex flex-wrap gap-2">
+				<Button variant={filter === 'all' ? 'default' : 'outline'} size="sm" onclick={() => (filter = 'all')}>All</Button>
+				<Button variant={filter === 'enabled' ? 'default' : 'outline'} size="sm" onclick={() => (filter = 'enabled')}>Enabled</Button>
+				<Button variant={filter === 'disabled' ? 'default' : 'outline'} size="sm" onclick={() => (filter = 'disabled')}>Archived</Button>
+			</div>
 
-button {
-  cursor: pointer;
-}
+			<Card.Root>
+				<Card.Content class="pt-6">
+					<ScrollArea.Root class="h-[34rem] rounded-xl border">
+						{#if filteredMods.length === 0}
+							<Empty.Root class="border-0">
+								<Empty.Header>
+									<Empty.Title>No matching mods</Empty.Title>
+									<Empty.Description>Import a folder or change the current filter to populate the library.</Empty.Description>
+								</Empty.Header>
+							</Empty.Root>
+						{:else}
+							<Table.Root>
+								<Table.Header>
+									<Table.Row>
+										<Table.Head>Mod</Table.Head>
+										<Table.Head>Targets</Table.Head>
+										<Table.Head>Imported</Table.Head>
+										<Table.Head class="text-right">State</Table.Head>
+									</Table.Row>
+								</Table.Header>
+								<Table.Body>
+									{#each filteredMods as mod (mod.id)}
+										<Table.Row>
+											<Table.Cell class="align-top">
+												<div class="space-y-2">
+													<div class="flex flex-wrap items-center gap-2">
+														<p class="font-medium">{mod.name}</p>
+														<Badge variant={mod.enabled ? 'default' : 'secondary'}>{mod.enabled ? 'Enabled' : 'Archived'}</Badge>
+													</div>
+													<p class="text-muted-foreground text-sm">{mod.fileName}</p>
+													{#if mod.description}
+														<p class="text-muted-foreground max-w-xl text-sm leading-6">{mod.description}</p>
+													{/if}
+												</div>
+											</Table.Cell>
+											<Table.Cell class="align-top">
+												<div class="flex max-w-md flex-wrap gap-2 pt-1">
+													{#each mod.targetFiles.slice(0, 3) as target (target)}
+														<Badge variant="outline">{target}</Badge>
+													{/each}
+													{#if mod.targetFiles.length > 3}
+														<Badge variant="secondary">+{mod.targetFiles.length - 3} more</Badge>
+													{/if}
+												</div>
+											</Table.Cell>
+											<Table.Cell class="text-muted-foreground align-top text-sm">{formatTimestamp(mod.importedAt)}</Table.Cell>
+											<Table.Cell class="align-top text-right">
+												<Button variant={mod.enabled ? 'outline' : 'default'} size="sm" disabled={busy.toggling === mod.id} onclick={() => toggleMod(mod)}>
+													{modActionLabel(mod)}
+												</Button>
+											</Table.Cell>
+										</Table.Row>
+									{/each}
+								</Table.Body>
+							</Table.Root>
+						{/if}
+					</ScrollArea.Root>
+				</Card.Content>
+			</Card.Root>
+		</section>
 
-button:hover {
-  border-color: #396cd8;
-}
-button:active {
-  border-color: #396cd8;
-  background-color: #e8e8e8;
-}
+		<section id="apply-logs" class="scroll-mt-24 space-y-4">
+			<div class="space-y-2">
+				<p class="text-muted-foreground text-xs font-medium uppercase tracking-[0.24em]">Apply & Logs</p>
+				<h2 class="text-2xl font-semibold tracking-tight">Overlay lifecycle</h2>
+			</div>
 
-input,
-button {
-  outline: none;
-}
+			<div class="flex flex-wrap gap-2">
+				<Button disabled={!install || enabledCount === 0 || busy.applying} onclick={runApply}><Sparkles class="size-4" /> Apply enabled mods</Button>
+				<Button variant="outline" disabled={!install || busy.restoring} onclick={runRestore}><RefreshCcw class="size-4" /> Restore vanilla overlay</Button>
+				<Button variant="destructive" disabled={busy.resetting} onclick={() => (resetDialogOpen = true)}>Reset active mods</Button>
+			</div>
 
-#greet-input {
-  margin-right: 5px;
-}
+			<Card.Root>
+				<Card.Header>
+					<Card.Title class="flex items-center gap-2"><Layers3 class="size-5" /> Current overlay state</Card.Title>
+				</Card.Header>
+				<Card.Content class="space-y-2 text-sm text-muted-foreground">
+					<p>Overlay: {overlayActive ? '0036 active' : 'vanilla'}</p>
+					<p>Backup: {backupExists ? '0.papgt.bak present' : 'not created yet'}</p>
+					<p>Enabled mods queued: {enabledCount}</p>
+					<p>Writable install: {install?.writable ? 'yes' : 'unknown / no'}</p>
+				</Card.Content>
+			</Card.Root>
 
-@media (prefers-color-scheme: dark) {
-  :root {
-    color: #f6f6f6;
-    background-color: #2f2f2f;
-  }
+			{#if lastApplyResult}
+				<Card.Root>
+					<Card.Header>
+						<Card.Title class="flex items-center gap-2"><CheckCircle2 class="size-5" /> Last apply result</Card.Title>
+						<Card.Description>{lastApplyResult.message}</Card.Description>
+					</Card.Header>
+					<Card.Content class="space-y-4">
+						<div class="flex flex-wrap gap-2">
+							<Badge variant="outline">{lastApplyResult.modCount} mods</Badge>
+							<Badge variant="outline">{lastApplyResult.overlayFileCount} files</Badge>
+							<Badge variant="outline">{lastApplyResult.pazSize} byte PAZ</Badge>
+						</div>
+						<ScrollArea.Root class="h-60 rounded-xl border">
+							<div class="divide-y">
+								{#each lastApplyResult.files as file (file.gameFile)}
+									<div class="space-y-1 px-4 py-3">
+										<div class="flex items-start justify-between gap-3">
+											<p class="text-sm font-medium break-all">{file.gameFile}</p>
+											<Badge variant="secondary">PAZ {file.sourcePazIndex}</Badge>
+										</div>
+										<p class="text-muted-foreground text-xs">
+											Applied {file.appliedChanges}, skipped {file.skippedChanges}
+											{#if file.reason}
+												- {file.reason}
+											{/if}
+										</p>
+									</div>
+								{/each}
+							</div>
+						</ScrollArea.Root>
+					</Card.Content>
+				</Card.Root>
+			{/if}
+		</section>
 
-  a:hover {
-    color: #24c8db;
-  }
+		<section id="tools" class="scroll-mt-24 space-y-4">
+			<div class="space-y-2">
+				<p class="text-muted-foreground text-xs font-medium uppercase tracking-[0.24em]">Tools</p>
+				<h2 class="text-2xl font-semibold tracking-tight">Game path, restore, and launcher</h2>
+			</div>
 
-  input,
-  button {
-    color: #ffffff;
-    background-color: #0f0f0f98;
-  }
-  button:active {
-    background-color: #0f0f0f69;
-  }
-}
+			<Card.Root>
+				<Card.Header>
+					<Card.Title class="flex items-center gap-2"><Gamepad2 class="size-5" /> Game install</Card.Title>
+					<Card.Description>Saved target for apply, restore, and launch actions.</Card.Description>
+				</Card.Header>
+				<Card.Content class="space-y-4">
+					<div class="space-y-2">
+						<Label for="game-path">Game path</Label>
+						<Input id="game-path" bind:value={gamePathInput} placeholder="Crimson Desert.app or packages path" />
+					</div>
+					<div class="flex flex-wrap gap-2">
+						<Button variant="outline" onclick={chooseGamePath}>Browse</Button>
+						<Button variant="outline" disabled={busy.detectingGame} onclick={detectInstall}>Detect</Button>
+						<Button disabled={busy.settingGame} onclick={saveGamePath}>Save Path</Button>
+						<Button variant="outline" disabled={!install || busy.launching} onclick={runLaunch}><Wrench class="size-4" /> Start game</Button>
+					</div>
+					<p class="text-muted-foreground text-sm break-all">{install?.packagesPath ?? 'Not configured yet'}</p>
+				</Card.Content>
+			</Card.Root>
+		</section>
 
-</style>
+		<section id="advanced" class="scroll-mt-24 space-y-4 pb-8">
+			<div class="space-y-2">
+				<p class="text-muted-foreground text-xs font-medium uppercase tracking-[0.24em]">Advanced</p>
+				<h2 class="text-2xl font-semibold tracking-tight">Research lane</h2>
+			</div>
+			<Card.Root>
+				<Card.Header>
+					<Card.Title class="flex items-center gap-2"><Archive class="size-5" /> PATHC and raw tooling later</Card.Title>
+					<Card.Description>
+						The local tool repos are now folded into the product direction. PATHC and raw workflows will live here after JSON, precompiled, and language parity.
+					</Card.Description>
+				</Card.Header>
+			</Card.Root>
+		</section>
+	</div>
+
+	<AlertDialog.Content>
+		<AlertDialog.Header>
+			<AlertDialog.Title>Reset active mods?</AlertDialog.Title>
+			<AlertDialog.Description>
+				This restores the game to vanilla and disables every active mod in the library. Archived imports remain available for later re-enabling.
+			</AlertDialog.Description>
+		</AlertDialog.Header>
+		<AlertDialog.Footer>
+			<AlertDialog.Cancel>Cancel</AlertDialog.Cancel>
+			<AlertDialog.Action disabled={busy.resetting} onclick={runReset}>Reset active mods</AlertDialog.Action>
+		</AlertDialog.Footer>
+	</AlertDialog.Content>
+</AlertDialog.Root>

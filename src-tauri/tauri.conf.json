@@ -12,9 +12,11 @@
   "app": {
     "windows": [
       {
-        "title": "crimson-desert-macos-mod-manager",
-        "width": 800,
-        "height": 600
+        "title": "Crimson Desert Mod Manager",
+        "width": 1480,
+        "height": 960,
+        "minWidth": 1180,
+        "minHeight": 820
       }
     ],
     "security": {
