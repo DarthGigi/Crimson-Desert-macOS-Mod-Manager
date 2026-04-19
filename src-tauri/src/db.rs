@@ -5,7 +5,7 @@ use std::path::{Path, PathBuf};
 use rusqlite::{params, Connection, OptionalExtension};
 
 use crate::error::{AppError, AppResult};
-use crate::models::{ManagedGroupRecord, ModKind, ModRecord};
+use crate::models::{HistoryEntry, ManagedGroupRecord, ModKind, ModRecord};
 use crate::util::{bool_to_int, int_to_bool, now_iso_string};
 
 pub const DATABASE_NAME: &str = "app.db";
@@ -145,6 +145,33 @@ pub fn insert_history(
         params![action, status, message, details_json, now_iso_string()],
     )?;
     Ok(())
+}
+
+pub fn list_history(connection: &Connection, limit: usize) -> AppResult<Vec<HistoryEntry>> {
+    let mut statement = connection.prepare(
+        "SELECT id, action, status, message, details_json, created_at
+         FROM history
+         ORDER BY id DESC
+         LIMIT ?1",
+    )?;
+
+    let rows = statement.query_map(params![limit as i64], |row| {
+        Ok(HistoryEntry {
+            id: row.get(0)?,
+            action: row.get(1)?,
+            status: row.get(2)?,
+            message: row.get(3)?,
+            details_json: row.get(4)?,
+            created_at: row.get(5)?,
+        })
+    })?;
+
+    let mut entries = Vec::new();
+    for row in rows {
+        entries.push(row?);
+    }
+
+    Ok(entries)
 }
 
 pub fn upsert_mod(connection: &Connection, record: &ModRecord) -> AppResult<()> {

@@ -266,3 +266,14 @@ pub struct ExtractResult {
     pub output_path: String,
     pub decompressed_size: usize,
 }
+
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct HistoryEntry {
+    pub id: i64,
+    pub action: String,
+    pub status: String,
+    pub message: String,
+    pub details_json: Option<String>,
+    pub created_at: String,
+}

@@ -11,7 +11,7 @@ use std::path::{Path, PathBuf};
 use std::sync::Mutex;
 
 use db::{
-    clear_managed_groups, clear_patch_toggles, connect, get_setting, insert_history, list_managed_groups, list_mods,
+    clear_managed_groups, clear_patch_toggles, connect, get_setting, insert_history, list_history, list_managed_groups, list_mods,
     list_disabled_patch_indexes, move_mod_in_load_order, replace_managed_groups, set_patch_enabled,
     set_setting, update_mod_classification, update_mod_enabled,
 };
@@ -19,7 +19,7 @@ use error::{AppError, ErrorPayload};
 use game::{
     detect_packages_dir, inspect_game_install, launch_game, resolve_to_packages_dir, LaunchResult,
 };
-use models::{ApplyPreview, ApplyResult, DashboardData, ExtractPreview, ExtractResult, GameInstallInfo, ModKind, ModPatchSummary, ModRecord, PathcRepackResult, PathcSummary, ScanResult, StatusSummary};
+use models::{ApplyPreview, ApplyResult, DashboardData, ExtractPreview, ExtractResult, GameInstallInfo, HistoryEntry, ModKind, ModPatchSummary, ModRecord, PathcRepackResult, PathcSummary, ScanResult, StatusSummary};
 use tauri::{AppHandle, Manager, State};
 
 const SETTINGS_GAME_PATH: &str = "game_packages_path";
@@ -632,6 +632,15 @@ fn extract_virtual_file_command(
     Ok(result)
 }
 
+#[tauri::command]
+fn get_history_command(
+    limit: Option<usize>,
+    state: State<'_, AppState>,
+) -> Result<Vec<HistoryEntry>, ErrorPayload> {
+    let connection = state.connection().map_err(ErrorPayload::from)?;
+    list_history(&connection, limit.unwrap_or(50)).map_err(ErrorPayload::from)
+}
+
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     tauri::Builder::default()
@@ -665,6 +674,7 @@ pub fn run() {
             fix_everything_command,
             get_virtual_file_preview_command,
             extract_virtual_file_command,
+            get_history_command,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

@@ -28,6 +28,7 @@
 		getModPatchSummaries,
 		getPathcSummary,
 		getVirtualFilePreview,
+		getHistory,
 		fixEverything,
 		importModVariant,
 		launchGame,
@@ -47,6 +48,7 @@
 		type DashboardData,
 		type ExtractPreview,
 		type ExtractResult,
+		type HistoryEntry,
 		type ModKind,
 		type ModPatchSummary,
 		type ModRecord,
@@ -80,6 +82,7 @@
 	let pathcResult = $state<PathcRepackResult | null>(null);
 	let extractPreview = $state<ExtractPreview | null>(null);
 	let extractResult = $state<ExtractResult | null>(null);
+	let historyEntries = $state<HistoryEntry[]>([]);
 	let selectedPatchModId = $state<string | null>(null);
 	let patchSummaries = $state<ModPatchSummary[]>([]);
 	let scanResults = $state<ScanResult[]>([]);
@@ -109,6 +112,7 @@
 		pathc: false,
 		repackingPathc: false,
 		extracting: false,
+		history: false,
 		restoring: false,
 		resetting: false,
 		fixing: false,
@@ -145,6 +149,8 @@
 		allMods.filter((mod) => mod.modKind === 'json_data' && mod.enabled).toSorted((left, right) => left.loadOrder - right.loadOrder)
 	);
 	const languageOptions = ['eng', 'jpn', 'kor', 'rus', 'tur', 'spa_es', 'spa_mx', 'fre', 'ger', 'ita', 'pol', 'por_br', 'zho_tw', 'zho_cn'];
+	const previewConflictFiles = $derived(applyPreview?.files.filter((file) => file.overlapCount > 0) ?? []);
+	const previewUnresolvedFiles = $derived(applyPreview?.files.filter((file) => !file.resolved) ?? []);
 
 	onMount(() => {
 		void refreshDashboard();
@@ -167,10 +173,23 @@
 			await refreshPatchSummaries();
 			await refreshPreview();
 			await refreshPathcSummary();
+			await refreshHistory();
 		} catch (error) {
 			setError(error, 'Could not load the mod manager dashboard');
 		} finally {
 			busy.boot = false;
+		}
+	}
+
+	async function refreshHistory() {
+		busy.history = true;
+		try {
+			historyEntries = await getHistory(40);
+		} catch (error) {
+			historyEntries = [];
+			setError(error, 'Could not load operation history');
+		} finally {
+			busy.history = false;
 		}
 	}
 
@@ -1073,10 +1092,41 @@
 							<Badge variant="outline">{applyPreview.modCount} active mods</Badge>
 							<Badge variant="outline">{applyPreview.targetFileCount} JSON targets</Badge>
 							<Badge variant="outline">{applyPreview.estimatedGroupCount} estimated groups</Badge>
+							{#if previewConflictFiles.length > 0}
+								<Badge>{previewConflictFiles.length} conflicts</Badge>
+							{/if}
+							{#if previewUnresolvedFiles.length > 0}
+								<Badge variant="secondary">{previewUnresolvedFiles.length} unresolved</Badge>
+							{/if}
 							{#if applyPreview.selectedLanguage}
 								<Badge>{applyPreview.selectedLanguage.toUpperCase()}</Badge>
 							{/if}
 						</div>
+
+						{#if previewConflictFiles.length > 0 || previewUnresolvedFiles.length > 0}
+							<div class="grid gap-3 sm:grid-cols-2">
+								{#if previewConflictFiles.length > 0}
+									<div class="rounded-xl border bg-muted/20 p-4">
+										<p class="text-muted-foreground text-xs uppercase tracking-[0.18em]">Conflict files</p>
+										<div class="mt-3 space-y-2 text-sm">
+											{#each previewConflictFiles.slice(0, 5) as file (file.sourceGroup + file.gameFile)}
+												<p class="break-all">{file.gameFile} <span class="text-muted-foreground">({file.overlapCount} overlaps)</span></p>
+											{/each}
+										</div>
+									</div>
+								{/if}
+								{#if previewUnresolvedFiles.length > 0}
+									<div class="rounded-xl border bg-muted/20 p-4">
+										<p class="text-muted-foreground text-xs uppercase tracking-[0.18em]">Unresolved files</p>
+										<div class="mt-3 space-y-2 text-sm">
+											{#each previewUnresolvedFiles.slice(0, 5) as file (file.sourceGroup + file.gameFile)}
+												<p class="break-all">{file.gameFile} <span class="text-muted-foreground">({file.reason})</span></p>
+											{/each}
+										</div>
+									</div>
+								{/if}
+							</div>
+						{/if}
 
 						<div class="grid gap-3 sm:grid-cols-3">
 							<div class="rounded-xl border bg-muted/20 p-4">
@@ -1167,6 +1217,37 @@
 					</Card.Content>
 				</Card.Root>
 			{/if}
+
+			<Card.Root>
+				<Card.Header>
+					<div class="flex items-center justify-between gap-3">
+						<div>
+							<Card.Title class="flex items-center gap-2"><Info class="size-5" /> Activity log</Card.Title>
+							<Card.Description>Recent operations and recovery actions recorded by the app.</Card.Description>
+						</div>
+						<Button variant="outline" size="sm" disabled={busy.history} onclick={refreshHistory}>{busy.history ? 'Refreshing...' : 'Refresh log'}</Button>
+					</div>
+				</Card.Header>
+				<Card.Content>
+					<ScrollArea.Root class="h-64 rounded-xl border">
+						<div class="divide-y">
+							{#each historyEntries as entry (entry.id)}
+								<div class="space-y-1 px-4 py-3 text-sm">
+									<div class="flex flex-wrap items-center justify-between gap-3">
+										<div class="flex items-center gap-2">
+											<Badge variant={entry.status === 'ok' ? 'outline' : 'secondary'}>{entry.action}</Badge>
+											<p class="font-medium">{entry.message}</p>
+										</div>
+										<p class="text-muted-foreground text-xs">{formatTimestamp(entry.createdAt)}</p>
+									</div>
+								</div>
+							{:else}
+								<div class="px-4 py-8 text-sm text-muted-foreground">No history entries yet.</div>
+							{/each}
+						</div>
+					</ScrollArea.Root>
+				</Card.Content>
+			</Card.Root>
 		</section>
 
 		<section id="tools" class="scroll-mt-24 space-y-4">

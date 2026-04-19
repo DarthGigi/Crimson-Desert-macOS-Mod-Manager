@@ -149,6 +149,15 @@ export type ExtractResult = {
 	decompressedSize: number;
 };
 
+export type HistoryEntry = {
+	id: number;
+	action: string;
+	status: string;
+	message: string;
+	detailsJson: string | null;
+	createdAt: string;
+};
+
 export type StatusSummary = {
 	gameInstall: GameInstallInfo | null;
 	selectedLanguage: string | null;
@@ -254,4 +263,8 @@ export async function getVirtualFilePreview(virtualPath: string, sourceGroup: st
 
 export async function extractVirtualFile(virtualPath: string, sourceGroup: string | null, outputDir: string) {
 	return invoke<ExtractResult>('extract_virtual_file_command', { virtualPath, sourceGroup, outputDir });
+}
+
+export async function getHistory(limit = 50) {
+	return invoke<HistoryEntry[]>('get_history_command', { limit });
 }
