@@ -11,7 +11,7 @@
 	import { Separator } from '$lib/components/ui/separator';
 	import * as ScrollArea from '$lib/components/ui/scroll-area';
 	import { manager } from '$lib/manager-state.svelte';
-    import type { ScanResult } from '$lib/desktop-api';
+	import type { ScanResult } from '$lib/desktop-api';
 
 	let importSourcePath = $state('');
 	let scanDetailsOpen = $state<Record<string, boolean>>({});
@@ -173,7 +173,10 @@
 					><HardDriveDownload class="size-4" /> Choose archive</Button
 				>
 				{#if manager.scanResults.length > 1}
-					<Button variant="outline" disabled={manager.busy.importing} onclick={() => manager.importScanResults(manager.scanResults)}
+					<Button
+						variant="outline"
+						disabled={manager.busy.importing}
+						onclick={() => manager.importScanResults(manager.scanResults)}
 						>Import all scanned mods</Button
 					>
 				{/if}
@@ -194,7 +197,10 @@
 				<ScrollArea.Root class="h-96 rounded-xl border"
 					><div class="space-y-3 p-3">
 						{#each groupedScanResults as group (group.key)}
-							<Collapsible.Root open={Boolean(variantGroupsOpen[group.key])} class="rounded-xl border bg-muted/20 px-4 py-4">
+							<Collapsible.Root
+								open={Boolean(variantGroupsOpen[group.key])}
+								class="rounded-xl border bg-muted/20 px-4 py-4"
+							>
 								<div class="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
 									<div class="space-y-2">
 										<p class="font-medium">{group.label}</p>
@@ -203,21 +209,42 @@
 										</p>
 										<div class="flex flex-wrap gap-2">
 											<Badge variant="secondary">{group.results[0].modKind}</Badge>
-											<Badge variant="outline">{group.results.length} option{group.results.length === 1 ? '' : 's'}</Badge>
-											<Badge variant="outline">{group.results.reduce((sum, result) => sum + result.changeCount, 0)} total changes</Badge>
+											<Badge variant="outline"
+												>{group.results.length} option{group.results.length === 1 ? '' : 's'}</Badge
+											>
+											<Badge variant="outline"
+												>{group.results.reduce((sum, result) => sum + result.changeCount, 0)} total changes</Badge
+											>
 										</div>
 									</div>
 									<div class="flex gap-2">
 										{#if group.results.length === 1}
-											<Button size="sm" disabled={manager.busy.importing} onclick={() => manager.importScanResult(group.results[0])}>
+											<Button
+												size="sm"
+												disabled={manager.busy.importing}
+												onclick={() => manager.importScanResult(group.results[0])}
+											>
 												Import
 											</Button>
 										{/if}
 										{#if group.results.length > 1}
-											<Button variant="outline" size="sm" disabled={manager.busy.importing} onclick={() => manager.importScanResults(group.results)}>Import all</Button>
+											<Button
+												variant="outline"
+												size="sm"
+												disabled={manager.busy.importing}
+												onclick={() => manager.importScanResults(group.results)}>Import all</Button
+											>
 										{/if}
-										<Button variant="outline" size="sm" onclick={() => (variantGroupsOpen[group.key] = !variantGroupsOpen[group.key])}>
-											{variantGroupsOpen[group.key] ? 'Hide options' : group.results.length > 1 ? 'Show options' : 'Details'}
+										<Button
+											variant="outline"
+											size="sm"
+											onclick={() => (variantGroupsOpen[group.key] = !variantGroupsOpen[group.key])}
+										>
+											{variantGroupsOpen[group.key]
+												? 'Hide options'
+												: group.results.length > 1
+													? 'Show options'
+													: 'Details'}
 										</Button>
 									</div>
 								</div>
@@ -227,7 +254,9 @@
 									<div class="space-y-3">
 										{#each group.results as result (result.path)}
 											<div class="rounded-lg border bg-background/60 px-4 py-4">
-												<div class="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
+												<div
+													class="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between"
+												>
 													<div class="space-y-2">
 														<p class="font-medium">{result.name}</p>
 														<p class="text-sm text-muted-foreground">{result.fileName}</p>
@@ -237,10 +266,19 @@
 														</div>
 													</div>
 													<div class="flex gap-2">
-														<Button variant="outline" size="sm" onclick={() => (scanDetailsOpen[result.path] = !scanDetailsOpen[result.path])}>
+														<Button
+															variant="outline"
+															size="sm"
+															onclick={() =>
+																(scanDetailsOpen[result.path] = !scanDetailsOpen[result.path])}
+														>
 															{scanDetailsOpen[result.path] ? 'Hide details' : 'Details'}
 														</Button>
-														<Button size="sm" disabled={manager.busy.importing} onclick={() => manager.importScanResult(result)}>Import</Button>
+														<Button
+															size="sm"
+															disabled={manager.busy.importing}
+															onclick={() => manager.importScanResult(result)}>Import</Button
+														>
 													</div>
 												</div>
 
@@ -248,7 +286,9 @@
 													<div class="mt-4">
 														<Separator class="mb-4" />
 														{#if result.description}
-															<p class="text-sm leading-6 text-muted-foreground">{result.description}</p>
+															<p class="text-sm leading-6 text-muted-foreground">
+																{result.description}
+															</p>
 														{/if}
 														<div class="mt-4 flex flex-wrap gap-2">
 															{#each result.targetFiles as target (target)}

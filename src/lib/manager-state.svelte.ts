@@ -32,7 +32,7 @@ import {
 	type AsiPluginInfo,
 	type DashboardData,
 	type UpdateInfo,
-    type ExternalFileInfo,
+	type ExternalFileInfo,
 	type ExtractPreview,
 	type ExtractResult,
 	type HistoryEntry,
@@ -508,7 +508,12 @@ class ManagerState {
 		}
 
 		if (lastError) {
-			this.setError(lastError, importedCount > 0 ? `Imported ${importedCount} mods before an error occurred` : 'Could not batch import mods');
+			this.setError(
+				lastError,
+				importedCount > 0
+					? `Imported ${importedCount} mods before an error occurred`
+					: 'Could not batch import mods'
+			);
 			return;
 		}
 
@@ -816,7 +821,9 @@ class ManagerState {
 		try {
 			this.dashboard = await startProblemModIsolation();
 			await Promise.all([this.refreshIsolationSession(), this.refreshHistory()]);
-			toast.success('Started problem-mod isolation. Test the current mod set and report the result.');
+			toast.success(
+				'Started problem-mod isolation. Test the current mod set and report the result.'
+			);
 		} catch (error) {
 			this.setError(error, 'Could not start problem-mod isolation');
 		}
@@ -827,7 +834,11 @@ class ManagerState {
 		try {
 			this.dashboard = await reportProblemModIsolation(crashed);
 			await Promise.all([this.refreshIsolationSession(), this.refreshHistory()]);
-			toast.success(crashed ? 'Marked the current test set as crashing.' : 'Marked the current test set as stable.');
+			toast.success(
+				crashed
+					? 'Marked the current test set as crashing.'
+					: 'Marked the current test set as stable.'
+			);
 		} catch (error) {
 			this.setError(error, 'Could not update problem-mod isolation');
 		}

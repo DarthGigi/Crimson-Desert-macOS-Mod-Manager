@@ -25,9 +25,9 @@
 		<h1 class="text-3xl font-semibold tracking-tight">Folder-based precompiled overlays</h1>
 		<p class="max-w-3xl text-sm leading-7 text-muted-foreground">
 			These mods already ship numeric groups or browser/raw files and install into fresh
-			manager-owned groups during apply. Browser/raw imports can also contain raw file types such
-			as BNK soundbanks. Use `Use as language` only for translation or
-			subtitle-style mods that should apply to one specific in-game language.
+			manager-owned groups during apply. Browser/raw imports can also contain raw file types such as
+			BNK soundbanks. Use `Use as language` only for translation or subtitle-style mods that should
+			apply to one specific in-game language.
 		</p>
 	</div>
 	<Card.Root
@@ -63,10 +63,7 @@
 										size="sm"
 										onclick={() => manager.classifyMod(mod, 'language', mod.modKind)}
 										>Use as language</Button
-									><Button
-										variant="destructive"
-										size="sm"
-										onclick={() => manager.removeMod(mod)}
+									><Button variant="destructive" size="sm" onclick={() => manager.removeMod(mod)}
 										>Remove</Button
 									>
 								</div>
