@@ -18,7 +18,7 @@ use error::{AppError, ErrorPayload};
 use game::{
     detect_packages_dir, inspect_game_install, launch_game, resolve_to_packages_dir, LaunchResult,
 };
-use models::{ApplyResult, DashboardData, GameInstallInfo, ModKind, ModRecord, ScanResult, StatusSummary};
+use models::{ApplyPreview, ApplyResult, DashboardData, GameInstallInfo, ModKind, ModRecord, ScanResult, StatusSummary};
 use tauri::{AppHandle, Manager, State};
 
 const SETTINGS_GAME_PATH: &str = "game_packages_path";
@@ -299,6 +299,21 @@ fn apply_mods_command(state: State<'_, AppState>) -> Result<ApplyResult, ErrorPa
 }
 
 #[tauri::command]
+fn get_apply_preview_command(state: State<'_, AppState>) -> Result<ApplyPreview, ErrorPayload> {
+    let connection = state.connection().map_err(ErrorPayload::from)?;
+    let packages_dir = saved_game_path(&connection)
+        .map_err(ErrorPayload::from)?
+        .ok_or_else(|| ErrorPayload {
+            message: "Set the Crimson Desert game path first.".to_string(),
+        })?;
+    let mods = list_mods(&connection).map_err(ErrorPayload::from)?;
+    let selected_language = get_setting(&connection, SETTINGS_GAME_LANGUAGE)
+        .map_err(ErrorPayload::from)?
+        .filter(|value| !value.is_empty());
+    patcher::preview_apply(&packages_dir, &mods, selected_language.as_deref()).map_err(ErrorPayload::from)
+}
+
+#[tauri::command]
 fn restore_vanilla_command(state: State<'_, AppState>) -> Result<DashboardData, ErrorPayload> {
     let _guard = state.operation_lock.lock().map_err(|_| ErrorPayload {
         message: "Operation lock poisoned".to_string(),
@@ -379,6 +394,7 @@ pub fn run() {
             set_selected_language_command,
             set_mod_classification_command,
             move_mod_in_load_order_command,
+            get_apply_preview_command,
             apply_mods_command,
             restore_vanilla_command,
             reset_active_mods_command,

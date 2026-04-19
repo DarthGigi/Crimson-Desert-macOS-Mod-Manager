@@ -22,6 +22,7 @@
 	import {
 		applyMods,
 		detectGameInstall,
+		getApplyPreview,
 		getDashboard,
 		importModVariant,
 		launchGame,
@@ -34,6 +35,7 @@
 		setSelectedLanguage,
 		setModEnabled,
 		type ApplyResult,
+		type ApplyPreview,
 		type DashboardData,
 		type ModKind,
 		type ModRecord,
@@ -60,6 +62,7 @@
 	};
 
 	let dashboard = $state<DashboardData | null>(null);
+	let applyPreview = $state<ApplyPreview | null>(null);
 	let scanResults = $state<ScanResult[]>([]);
 	let lastApplyResult = $state<ApplyResult | null>(null);
 	let gamePathInput = $state('');
@@ -76,6 +79,7 @@
 		scanningMods: false,
 		importing: false,
 		applying: false,
+		previewing: false,
 		restoring: false,
 		resetting: false,
 		launching: false,
@@ -119,10 +123,30 @@
 		try {
 			dashboard = await getDashboard();
 			gamePathInput = dashboard.status.gameInstall?.packagesPath ?? gamePathInput;
+			await refreshPreview();
 		} catch (error) {
 			setError(error, 'Could not load the mod manager dashboard');
 		} finally {
 			busy.boot = false;
+		}
+	}
+
+	async function refreshPreview() {
+		if (!dashboard?.status.gameInstall && !gamePathInput) {
+			applyPreview = null;
+			return;
+		}
+
+		busy.previewing = true;
+		try {
+			applyPreview = await getApplyPreview();
+		} catch (error) {
+			applyPreview = null;
+			if (toMessage(error) !== 'Set the Crimson Desert game path first.') {
+				setError(error, 'Could not build the apply preview');
+			}
+		} finally {
+			busy.previewing = false;
 		}
 	}
 
@@ -273,6 +297,7 @@
 		try {
 			dashboard = await restoreVanilla();
 			lastApplyResult = null;
+			applyPreview = null;
 			toast.success('Restored the game overlay to vanilla.');
 		} catch (error) {
 			setError(error, 'Could not restore the vanilla overlay');
@@ -287,6 +312,7 @@
 		try {
 			dashboard = await resetActiveMods();
 			lastApplyResult = null;
+			applyPreview = null;
 			resetDialogOpen = false;
 			toast.success('Disabled every active mod and restored vanilla files.');
 		} catch (error) {
@@ -742,10 +768,77 @@
 			</div>
 
 			<div class="flex flex-wrap gap-2">
+				<Button variant="outline" disabled={busy.previewing} onclick={refreshPreview}>{busy.previewing ? 'Refreshing preview...' : 'Refresh preview'}</Button>
 				<Button disabled={!install || enabledCount === 0 || busy.applying} onclick={runApply}><Sparkles class="size-4" /> Apply enabled mods</Button>
 				<Button variant="outline" disabled={!install || busy.restoring} onclick={runRestore}><RefreshCcw class="size-4" /> Restore vanilla overlay</Button>
 				<Button variant="destructive" disabled={busy.resetting} onclick={() => (resetDialogOpen = true)}>Reset active mods</Button>
 			</div>
+
+			<Card.Root>
+				<Card.Header>
+					<Card.Title class="flex items-center gap-2"><Info class="size-5" /> Apply preview</Card.Title>
+					<Card.Description>Preview the active mod set before creating fresh manager-owned overlay groups.</Card.Description>
+				</Card.Header>
+				<Card.Content class="space-y-4">
+					{#if !applyPreview}
+						<Alert.Root>
+							<Info class="size-4" />
+							<Alert.Title>No preview available</Alert.Title>
+							<Alert.Description>Save a valid game path and enable at least one mod to build an apply preview.</Alert.Description>
+						</Alert.Root>
+					{:else}
+						<div class="flex flex-wrap gap-2">
+							<Badge variant="outline">{applyPreview.modCount} active mods</Badge>
+							<Badge variant="outline">{applyPreview.targetFileCount} JSON targets</Badge>
+							<Badge variant="outline">{applyPreview.estimatedGroupCount} estimated groups</Badge>
+							{#if applyPreview.selectedLanguage}
+								<Badge>{applyPreview.selectedLanguage.toUpperCase()}</Badge>
+							{/if}
+						</div>
+
+						<div class="grid gap-3 sm:grid-cols-3">
+							<div class="rounded-xl border bg-muted/20 p-4">
+								<p class="text-muted-foreground text-xs uppercase tracking-[0.18em]">JSON mods</p>
+								<p class="mt-2 text-2xl font-semibold">{applyPreview.jsonModCount}</p>
+							</div>
+							<div class="rounded-xl border bg-muted/20 p-4">
+								<p class="text-muted-foreground text-xs uppercase tracking-[0.18em]">Precompiled</p>
+								<p class="mt-2 text-2xl font-semibold">{applyPreview.precompiledModCount}</p>
+							</div>
+							<div class="rounded-xl border bg-muted/20 p-4">
+								<p class="text-muted-foreground text-xs uppercase tracking-[0.18em]">Browser/raw</p>
+								<p class="mt-2 text-2xl font-semibold">{applyPreview.browserRawModCount}</p>
+							</div>
+						</div>
+
+						<ScrollArea.Root class="h-72 rounded-xl border">
+							<div class="divide-y">
+								{#each applyPreview.files as file (file.sourceGroup + ':' + file.gameFile)}
+									<div class="space-y-2 px-4 py-3">
+										<div class="flex flex-wrap items-center justify-between gap-3">
+											<div>
+												<p class="text-sm font-medium break-all">{file.gameFile}</p>
+												<p class="text-muted-foreground text-xs">{file.sourceGroup}{#if file.sourcePazIndex !== null} / PAZ {file.sourcePazIndex}{/if}</p>
+											</div>
+											<div class="flex flex-wrap gap-2">
+												<Badge variant={file.resolved ? 'outline' : 'secondary'}>{file.resolved ? 'Resolved' : 'Unresolved'}</Badge>
+												<Badge variant="outline">{file.changeCount} changes</Badge>
+												{#if file.overlapCount > 0}
+													<Badge>{file.overlapCount} overlaps</Badge>
+												{/if}
+											</div>
+										</div>
+										<p class="text-muted-foreground text-xs">Mods: {file.sourceMods.join(', ')}</p>
+										{#if file.reason}
+											<p class="text-destructive text-xs">{file.reason}</p>
+										{/if}
+									</div>
+								{/each}
+							</div>
+						</ScrollArea.Root>
+					{/if}
+				</Card.Content>
+			</Card.Root>
 
 			<Card.Root>
 				<Card.Header>

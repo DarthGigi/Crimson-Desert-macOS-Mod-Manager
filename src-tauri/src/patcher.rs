@@ -5,7 +5,7 @@ use std::path::Path;
 use lz4_flex::block;
 
 use crate::error::{AppError, AppResult};
-use crate::models::{ApplyFileResult, ApplyResult, ManagedGroupRecord, ModChange, ModKind, ModRecord};
+use crate::models::{ApplyFileResult, ApplyPreview, ApplyPreviewFile, ApplyResult, ManagedGroupRecord, ModChange, ModKind, ModRecord};
 use crate::mods::{load_enabled_manifests, merged_changes};
 use crate::util::now_iso_string;
 
@@ -460,6 +460,105 @@ pub fn apply_mods(
             enabled_manifests.len() + enabled_precompiled.len(),
             created_groups.len(),
         ),
+    })
+}
+
+pub fn preview_apply(
+    game_dir: &Path,
+    records: &[ModRecord],
+    selected_language: Option<&str>,
+) -> AppResult<ApplyPreview> {
+    let enabled_manifests = load_enabled_manifests(records, selected_language)?;
+    let enabled_dir_backed: Vec<ModRecord> = records
+        .iter()
+        .filter(|record| {
+            let is_dir_backed = Path::new(&record.library_path).is_dir();
+            record.enabled
+                && match record.mod_kind {
+                    ModKind::PrecompiledOverlay | ModKind::BrowserRaw => is_dir_backed,
+                    ModKind::Language => is_dir_backed && record.language.as_deref() == selected_language,
+                    ModKind::JsonData => false,
+                }
+        })
+        .cloned()
+        .collect();
+
+    let merged = merged_changes(&enabled_manifests);
+    let mut file_index_cache = BTreeMap::new();
+    let mut files = Vec::new();
+
+    for (target, changes) in merged {
+        let source_mods: Vec<String> = changes
+            .iter()
+            .map(|(mod_name, _)| mod_name.split('#').next().unwrap_or(mod_name).to_string())
+            .collect();
+        let overlap_count = count_overlaps(&changes);
+
+        let preview_file = match load_group_indexes(game_dir, &target.source_group, &mut file_index_cache) {
+            Ok((simple_index, full_index)) => {
+                match resolve_game_file(&target.game_file, simple_index, full_index) {
+                    Some(info) => ApplyPreviewFile {
+                        game_file: info.full_path.clone(),
+                        source_group: target.source_group,
+                        source_paz_index: Some(info.record.paz_index),
+                        change_count: changes.len(),
+                        overlap_count,
+                        source_mods,
+                        resolved: true,
+                        reason: None,
+                    },
+                    None => ApplyPreviewFile {
+                        game_file: target.game_file,
+                        source_group: target.source_group,
+                        source_paz_index: None,
+                        change_count: changes.len(),
+                        overlap_count,
+                        source_mods,
+                        resolved: false,
+                        reason: Some("Target file not found in the declared source group".to_string()),
+                    },
+                }
+            }
+            Err(err) => ApplyPreviewFile {
+                game_file: target.game_file,
+                source_group: target.source_group,
+                source_paz_index: None,
+                change_count: changes.len(),
+                overlap_count,
+                source_mods,
+                resolved: false,
+                reason: Some(err.to_string()),
+            },
+        };
+
+        files.push(preview_file);
+    }
+
+    files.sort_by(|left, right| {
+        left.source_group
+            .cmp(&right.source_group)
+            .then(left.game_file.cmp(&right.game_file))
+    });
+
+    let precompiled_mod_count = enabled_dir_backed
+        .iter()
+        .filter(|record| record.mod_kind == ModKind::PrecompiledOverlay)
+        .count();
+    let browser_raw_mod_count = enabled_dir_backed
+        .iter()
+        .filter(|record| record.mod_kind == ModKind::BrowserRaw)
+        .count();
+    let estimated_group_count = usize::from(!files.is_empty()) + enabled_dir_backed.len();
+
+    Ok(ApplyPreview {
+        mod_count: enabled_manifests.len() + enabled_dir_backed.len(),
+        json_mod_count: enabled_manifests.len(),
+        precompiled_mod_count,
+        browser_raw_mod_count,
+        target_file_count: files.len(),
+        estimated_group_count,
+        selected_language: selected_language.map(str::to_string),
+        files,
     })
 }
 

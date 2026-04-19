@@ -135,6 +135,32 @@ pub struct ApplyResult {
     pub message: String,
 }
 
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ApplyPreviewFile {
+    pub game_file: String,
+    pub source_group: String,
+    pub source_paz_index: Option<u16>,
+    pub change_count: usize,
+    pub overlap_count: usize,
+    pub source_mods: Vec<String>,
+    pub resolved: bool,
+    pub reason: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ApplyPreview {
+    pub mod_count: usize,
+    pub json_mod_count: usize,
+    pub precompiled_mod_count: usize,
+    pub browser_raw_mod_count: usize,
+    pub target_file_count: usize,
+    pub estimated_group_count: usize,
+    pub selected_language: Option<String>,
+    pub files: Vec<ApplyPreviewFile>,
+}
+
 #[derive(Debug, Clone)]
 pub struct ManagedGroupRecord {
     pub group_name: String,

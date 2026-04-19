@@ -64,6 +64,28 @@ export type ApplyResult = {
 	message: string;
 };
 
+export type ApplyPreviewFile = {
+	gameFile: string;
+	sourceGroup: string;
+	sourcePazIndex: number | null;
+	changeCount: number;
+	overlapCount: number;
+	sourceMods: string[];
+	resolved: boolean;
+	reason: string | null;
+};
+
+export type ApplyPreview = {
+	modCount: number;
+	jsonModCount: number;
+	precompiledModCount: number;
+	browserRawModCount: number;
+	targetFileCount: number;
+	estimatedGroupCount: number;
+	selectedLanguage: string | null;
+	files: ApplyPreviewFile[];
+};
+
 export type StatusSummary = {
 	gameInstall: GameInstallInfo | null;
 	selectedLanguage: string | null;
@@ -123,6 +145,10 @@ export async function moveModInLoadOrder(modId: string, direction: 'up' | 'down'
 
 export async function applyMods() {
 	return invoke<ApplyResult>('apply_mods_command');
+}
+
+export async function getApplyPreview() {
+	return invoke<ApplyPreview>('get_apply_preview_command');
 }
 
 export async function restoreVanilla() {
