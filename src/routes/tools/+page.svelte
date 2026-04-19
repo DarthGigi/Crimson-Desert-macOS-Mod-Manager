@@ -54,6 +54,11 @@
 			manager state when needed.
 		</p>
 	</div>
+	<div class="grid gap-4 md:grid-cols-3">
+		<Card.Root><Card.Content class="pt-6"><p class="text-sm font-medium">Normal recovery</p><p class="mt-2 text-sm text-muted-foreground">Use `Restore vanilla overlay` or `Reset active mods` after a failed apply or when switching setups.</p></Card.Content></Card.Root>
+		<Card.Root><Card.Content class="pt-6"><p class="text-sm font-medium">Full reset</p><p class="mt-2 text-sm text-muted-foreground">Use `Fix Everything` only when the manager state looks broken or an operation was interrupted.</p></Card.Content></Card.Root>
+		<Card.Root><Card.Content class="pt-6"><p class="text-sm font-medium">Crash troubleshooting</p><p class="mt-2 text-sm text-muted-foreground">Use problem-mod isolation to narrow a crash down to a smaller test set before removing mods manually.</p></Card.Content></Card.Root>
+	</div>
 	{#if manager.recoveryPending}<Alert.Root variant="destructive"
 			><AlertCircle class="size-4" /><Alert.Title>Recovery recommended</Alert.Title
 			><Alert.Description
@@ -137,7 +142,7 @@
 				>Use a guided binary-search workflow to narrow down which currently enabled mod is causing a crash or bad behavior.</Card.Description
 			></Card.Header
 		><Card.Content class="space-y-4"
-			>{#if !manager.isolationSession}<div class="flex flex-wrap gap-2"><Button onclick={() => manager.startProblemModIsolation()}>Start isolation</Button></div><p class="text-sm text-muted-foreground">Enable the mods you want to test first, then start isolation. The app will temporarily narrow the enabled set each round.</p>{:else}<div class="rounded-xl border bg-muted/20 p-4 text-sm"><p class="font-medium">Round {manager.isolationSession.rounds}</p><p class="mt-2 text-muted-foreground">Testing {manager.isolationSession.currentTestSet.length} mod(s) out of {manager.isolationSession.suspects.length} suspect(s).</p>{#if manager.isolationSession.resolvedModId}<p class="mt-2 text-destructive">Likely culprit: {manager.isolationSession.resolvedModId}</p>{/if}</div><div class="flex flex-wrap gap-2"><Button variant="destructive" onclick={() => manager.reportProblemModIsolation(true)}>This set crashed</Button><Button variant="outline" onclick={() => manager.reportProblemModIsolation(false)}>This set is stable</Button><Button variant="outline" onclick={() => manager.clearProblemModIsolation()}>Clear session</Button></div>{/if}</Card.Content
+			>{#if !manager.isolationSession}<div class="flex flex-wrap gap-2"><Button onclick={() => manager.startProblemModIsolation()}>Start isolation</Button></div><p class="text-sm text-muted-foreground">1. Enable the mods you want to test. 2. Start isolation. 3. Launch the game and try to reproduce the problem. 4. Report whether the current test set crashed or stayed stable.</p>{:else}<div class="rounded-xl border bg-muted/20 p-4 text-sm"><p class="font-medium">Round {manager.isolationSession.rounds}</p><p class="mt-2 text-muted-foreground">Testing {manager.isolationSession.currentTestSet.length} mod(s) out of {manager.isolationSession.suspects.length} suspect(s).</p>{#if manager.isolationSession.resolvedModId}<p class="mt-2 text-destructive">Likely culprit: {manager.isolationSession.resolvedModId}</p>{/if}</div><div class="flex flex-wrap gap-2"><Button variant="destructive" onclick={() => manager.reportProblemModIsolation(true)}>This set crashed</Button><Button variant="outline" onclick={() => manager.reportProblemModIsolation(false)}>This set is stable</Button><Button variant="outline" onclick={() => manager.clearProblemModIsolation()}>Clear session</Button></div>{/if}</Card.Content
 		></Card.Root
 	>
 	<Card.Root
@@ -155,7 +160,7 @@
 				>Export a JSON report containing dashboard state, history, and any active isolation session.</Card.Description
 			></Card.Header
 		><Card.Content class="space-y-4"
-			><div class="space-y-2"><Label for="report-output">Report output path</Label><div class="flex flex-wrap gap-2"><Input id="report-output" bind:value={reportOutputPath} placeholder="Choose where to save the diagnostic report" /><Button variant="outline" onclick={chooseReportOutput}>Browse</Button><Button onclick={() => manager.exportDiagnosticReport(reportOutputPath)}>Export report</Button></div></div></Card.Content
+			><div class="space-y-2"><Label for="report-output">Report output path</Label><div class="flex flex-wrap gap-2"><Input id="report-output" bind:value={reportOutputPath} placeholder="Choose where to save the diagnostic report" /><Button variant="outline" onclick={chooseReportOutput}>Browse</Button><Button disabled={!reportOutputPath.trim()} onclick={() => manager.exportDiagnosticReport(reportOutputPath)}>Export report</Button></div></div><p class="text-sm text-muted-foreground">The exported report includes dashboard state, recent history, and any active isolation session.</p></Card.Content
 		></Card.Root
 	>
 </div>

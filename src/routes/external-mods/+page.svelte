@@ -49,6 +49,11 @@
 			BNK soundbanks, script-installer mods, and binary patch packages.
 		</p>
 	</div>
+	<div class="grid gap-4 md:grid-cols-3">
+		<Card.Root><Card.Content class="pt-6"><p class="text-sm font-medium">BNK</p><p class="mt-2 text-sm text-muted-foreground">Copies imported soundbank files into the managed soundbank folder for this install.</p></Card.Content></Card.Root>
+		<Card.Root><Card.Content class="pt-6"><p class="text-sm font-medium">Binary patches</p><p class="mt-2 text-sm text-muted-foreground">Apply `.bsdiff` or `.xdelta` patches to a source file and write the result to a chosen output file.</p></Card.Content></Card.Root>
+		<Card.Root><Card.Content class="pt-6"><p class="text-sm font-medium">Script installers</p><p class="mt-2 text-sm text-muted-foreground">Stage the script files, then run a macOS-supported installer from a chosen working directory.</p></Card.Content></Card.Root>
+	</div>
 
 	<Card.Root>
 		<Card.Header>
@@ -78,9 +83,9 @@
 										<Button size="sm" onclick={() => manager.installBnkMod(mod)}>Install</Button>
 									{:else if mod.modKind === 'script_installer'}
 										<Button size="sm" onclick={() => manager.installScriptMod(mod)}>Stage files</Button>
-										<Button variant="outline" size="sm" onclick={() => manager.runScriptInstaller(mod, scriptWorkingDir || '.')}>Run script</Button>
+										<Button variant="outline" size="sm" disabled={!scriptWorkingDir.trim()} onclick={() => manager.runScriptInstaller(mod, scriptWorkingDir)}>Run script</Button>
 									{:else if mod.modKind === 'binary_patch'}
-										<Button size="sm" onclick={() => manager.applyBinaryPatch(mod, binaryTargetPath, binaryOutputPath)}>Apply patch</Button>
+										<Button size="sm" disabled={!binaryTargetPath.trim() || !binaryOutputPath.trim()} onclick={() => manager.applyBinaryPatch(mod, binaryTargetPath, binaryOutputPath)}>Apply patch</Button>
 									{/if}
 									<Button variant="destructive" size="sm" onclick={() => manager.removeMod(mod)}>Remove import</Button>
 								</div>
@@ -137,6 +142,7 @@
 				</div>
 			</div>
 			<p class="text-sm text-muted-foreground">Binary patch mods require you to choose the original source file and where the patched output should be written.</p>
+			<p class="text-xs text-muted-foreground">Tip: write to a separate output file first so you can inspect the patched result before replacing anything manually.</p>
 		</Card.Content>
 	</Card.Root>
 
@@ -154,6 +160,7 @@
 				</div>
 			</div>
 			<p class="text-sm text-muted-foreground">`.sh`, `.command`, and `.py` installers can be executed here. Windows `.bat` installers will be detected but remain unsupported on native macOS.</p>
+			{#if !scriptWorkingDir.trim()}<p class="text-xs text-muted-foreground">Choose a working directory before running a script installer.</p>{/if}
 		</Card.Content>
 	</Card.Root>
 </div>
