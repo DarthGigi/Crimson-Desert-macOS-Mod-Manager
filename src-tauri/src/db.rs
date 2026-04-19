@@ -276,6 +276,44 @@ pub fn update_mod_classification(
     Ok(())
 }
 
+pub fn move_mod_in_load_order(connection: &mut Connection, mod_id: &str, direction: &str) -> AppResult<()> {
+    let mods = list_mods(connection)?;
+    let mut ordered: Vec<ModRecord> = mods
+        .into_iter()
+        .filter(|record| record.enabled && record.mod_kind == ModKind::JsonData)
+        .collect();
+
+    let Some(index) = ordered.iter().position(|record| record.id == mod_id) else {
+        return Err(AppError::NotFound(format!(
+            "No enabled JSON mod found for load-order move: {mod_id}"
+        )));
+    };
+
+    let swap_index = match direction {
+        "up" if index > 0 => index - 1,
+        "down" if index + 1 < ordered.len() => index + 1,
+        "up" | "down" => return Ok(()),
+        _ => {
+            return Err(AppError::Other(format!(
+                "Unsupported load-order direction: {direction}"
+            )))
+        }
+    };
+
+    ordered.swap(index, swap_index);
+
+    let transaction = connection.transaction()?;
+    for (position, record) in ordered.iter().enumerate() {
+        transaction.execute(
+            "UPDATE mods SET load_order = ?2, updated_at = ?3 WHERE id = ?1",
+            params![record.id, position as i64, now_iso_string()],
+        )?;
+    }
+    transaction.commit()?;
+
+    Ok(())
+}
+
 pub fn disable_all_mods(connection: &Connection) -> AppResult<()> {
     connection.execute(
         "UPDATE mods SET enabled = 0, updated_at = ?1 WHERE enabled = 1",

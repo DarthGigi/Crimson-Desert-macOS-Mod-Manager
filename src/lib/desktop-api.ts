@@ -117,6 +117,10 @@ export async function setModClassification(modId: string, modKind: ModKind, lang
 	return invoke<DashboardData>('set_mod_classification_command', { modId, modKind, language });
 }
 
+export async function moveModInLoadOrder(modId: string, direction: 'up' | 'down') {
+	return invoke<DashboardData>('move_mod_in_load_order_command', { modId, direction });
+}
+
 export async function applyMods() {
 	return invoke<ApplyResult>('apply_mods_command');
 }

@@ -11,7 +11,8 @@ use std::sync::Mutex;
 
 use db::{
     clear_managed_groups, connect, get_setting, insert_history, list_managed_groups, list_mods,
-    replace_managed_groups, set_setting, update_mod_classification, update_mod_enabled,
+    move_mod_in_load_order, replace_managed_groups, set_setting, update_mod_classification,
+    update_mod_enabled,
 };
 use error::{AppError, ErrorPayload};
 use game::{
@@ -242,6 +243,25 @@ fn set_mod_classification_command(
 }
 
 #[tauri::command]
+fn move_mod_in_load_order_command(
+    mod_id: String,
+    direction: String,
+    state: State<'_, AppState>,
+) -> Result<DashboardData, ErrorPayload> {
+    let mut connection = state.connection().map_err(ErrorPayload::from)?;
+    move_mod_in_load_order(&mut connection, &mod_id, &direction).map_err(ErrorPayload::from)?;
+    insert_history(
+        &connection,
+        "reorder",
+        "ok",
+        &format!("Moved mod {mod_id} {direction} in JSON load order"),
+        None,
+    )
+    .map_err(ErrorPayload::from)?;
+    build_dashboard(&connection).map_err(ErrorPayload::from)
+}
+
+#[tauri::command]
 fn apply_mods_command(state: State<'_, AppState>) -> Result<ApplyResult, ErrorPayload> {
     let _guard = state.operation_lock.lock().map_err(|_| ErrorPayload {
         message: "Operation lock poisoned".to_string(),
@@ -346,6 +366,7 @@ pub fn run() {
             set_mod_enabled_command,
             set_selected_language_command,
             set_mod_classification_command,
+            move_mod_in_load_order_command,
             apply_mods_command,
             restore_vanilla_command,
             reset_active_mods_command,

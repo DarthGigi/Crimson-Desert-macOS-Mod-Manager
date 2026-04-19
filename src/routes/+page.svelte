@@ -25,6 +25,7 @@
 		getDashboard,
 		importModVariant,
 		launchGame,
+		moveModInLoadOrder,
 		resetActiveMods,
 		restoreVanilla,
 		scanModFolder,
@@ -104,6 +105,9 @@
 	const selectedLanguage = $derived(dashboard?.status.selectedLanguage ?? null);
 	const languageMods = $derived(allMods.filter((mod) => mod.modKind === 'language'));
 	const precompiledMods = $derived(allMods.filter((mod) => mod.modKind === 'precompiled_overlay'));
+	const orderedJsonMods = $derived(
+		allMods.filter((mod) => mod.modKind === 'json_data' && mod.enabled).toSorted((left, right) => left.loadOrder - right.loadOrder)
+	);
 	const languageOptions = ['eng', 'jpn', 'kor', 'rus', 'tur', 'spa_es', 'spa_mx', 'fre', 'ger', 'ita', 'pol', 'por_br', 'zho_tw', 'zho_cn'];
 
 	onMount(() => {
@@ -330,6 +334,16 @@
 		}
 	}
 
+	async function moveMod(mod: ModRecord, direction: 'up' | 'down') {
+		clearMessage();
+		try {
+			dashboard = await moveModInLoadOrder(mod.id, direction);
+			toast.success(`${mod.name} moved ${direction} in JSON load order.`);
+		} catch (error) {
+			setError(error, `Could not move ${mod.name}`);
+		}
+	}
+
 	function modKindLabel(modKind: ModKind) {
 		if (modKind === 'json_data') return 'JSON';
 		if (modKind === 'precompiled_overlay') return 'Precompiled';
@@ -504,17 +518,32 @@
 				<Card.Header>
 					<Card.Title class="flex items-center gap-2"><ArrowDownUp class="size-5" /> Load order and overlap</Card.Title>
 					<Card.Description>
-						The UI shell is ready for a proper load-order section. Backend support for entry-level overlap and “lower wins” behavior is the next pass.
+						Enabled JSON mods are merged in the order shown below. Lower items win when they target the same entry or byte range.
 					</Card.Description>
 				</Card.Header>
 				<Card.Content>
-					<Alert.Root>
-						<Info class="size-4" />
-						<Alert.Title>Next implementation step</Alert.Title>
-						<Alert.Description>
-							Persist load order, report overlaps informatively, and merge JSON changes at the entry level rather than treating file matches as global conflicts.
-						</Alert.Description>
-					</Alert.Root>
+					{#if orderedJsonMods.length === 0}
+						<Alert.Root>
+							<Info class="size-4" />
+							<Alert.Title>No enabled JSON mods</Alert.Title>
+							<Alert.Description>Enable one or more JSON mods to establish an apply order.</Alert.Description>
+						</Alert.Root>
+					{:else}
+						<div class="space-y-3">
+							{#each orderedJsonMods as mod, index (mod.id)}
+								<div class="flex flex-col gap-3 rounded-xl border bg-muted/20 px-4 py-4 sm:flex-row sm:items-center sm:justify-between">
+									<div>
+										<p class="font-medium">{index + 1}. {mod.name}</p>
+										<p class="text-muted-foreground text-sm">{mod.fileName}</p>
+									</div>
+									<div class="flex gap-2">
+										<Button variant="outline" size="sm" disabled={index === 0} onclick={() => moveMod(mod, 'up')}>Up</Button>
+										<Button variant="outline" size="sm" disabled={index === orderedJsonMods.length - 1} onclick={() => moveMod(mod, 'down')}>Down</Button>
+									</div>
+								</div>
+							{/each}
+						</div>
+					{/if}
 				</Card.Content>
 			</Card.Root>
 		</section>
