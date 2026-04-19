@@ -3,8 +3,13 @@ name: release
 on:
   workflow_dispatch:
   push:
-    tags:
-      - 'v*'
+    branches:
+      - main
+    paths:
+      - package.json
+      - src-tauri/Cargo.toml
+      - src-tauri/tauri.conf.json
+      - CHANGELOG.md
 
 jobs:
   build-macos:
@@ -58,6 +63,13 @@ jobs:
       - name: Build Tauri bundles
         run: pnpm tauri build --bundles app,dmg --target ${{ matrix.target }}
 
+      - name: Read app version
+        id: version
+        shell: bash
+        run: |
+          VERSION=$(node -p "require('./package.json').version")
+          echo "version=$VERSION" >> "$GITHUB_OUTPUT"
+
       - name: Resolve bundle paths
         id: bundle_paths
         shell: bash
@@ -92,6 +104,8 @@ jobs:
       - name: Publish release assets
         uses: softprops/action-gh-release@v2
         with:
+          tag_name: v${{ steps.version.outputs.version }}
+          name: Crimson Desert Mod Manager v${{ steps.version.outputs.version }}
           files: |
             ${{ steps.bundle_paths.outputs.app_path }}
             ${{ steps.bundle_paths.outputs.dmg_path }}
