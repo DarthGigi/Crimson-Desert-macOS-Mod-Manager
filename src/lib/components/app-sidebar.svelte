@@ -83,7 +83,7 @@
 				<div
 					class="rounded-xl border border-sidebar-border bg-sidebar-accent/40 p-3 text-xs leading-5 text-sidebar-foreground/75"
 				>
-					<p class="font-medium text-sidebar-foreground">Current focus</p>
+					<p class="font-medium text-sidebar-foreground">Workspace</p>
 					<p class="mt-1">
 						Routed workspace is live. Use the sidebar to move between mod types, apply tools, and
 						advanced workflows.

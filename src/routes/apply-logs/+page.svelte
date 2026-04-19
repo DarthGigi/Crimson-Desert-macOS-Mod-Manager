@@ -205,7 +205,7 @@
 								<p class="text-xs text-muted-foreground">{formatTimestamp(entry.createdAt)}</p>
 							</div>
 						</div>{:else}<div class="px-4 py-8 text-sm text-muted-foreground">
-							No history entries yet.
+							Run an import, preview, apply, extraction, or recovery action to populate the log.
 						</div>{/each}
 				</div></ScrollArea.Root
 			></Card.Content

@@ -78,7 +78,7 @@
 			>{#if manager.languageMods.length === 0}<Empty.Root
 					class="min-h-40 border-dashed bg-muted/20 p-8"
 					><Empty.Header
-						><Empty.Title>No language mods yet</Empty.Title><Empty.Description
+						><Empty.Title>No language mods classified</Empty.Title><Empty.Description
 							>Classify imported mods as language mods from the Library or Precompiled Mods pages.</Empty.Description
 						></Empty.Header
 					></Empty.Root

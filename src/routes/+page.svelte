@@ -117,7 +117,7 @@
 									variant="outline">{manager.applyPreview.targetFileCount} JSON targets</Badge
 								><Badge variant="outline">{manager.applyPreview.estimatedGroupCount} groups</Badge>
 							</div>{:else}<p class="mt-3 text-sm text-muted-foreground">
-								No preview loaded yet.
+								Load a game path and enable mods to generate a preview.
 							</p>{/if}</Card.Content
 					></Card.Root
 				>
