@@ -11,6 +11,7 @@
 		Gamepad2,
 		Globe2,
 		HardDriveDownload,
+		Image,
 		Info,
 		Layers3,
 		Package,
@@ -25,10 +26,12 @@
 		getApplyPreview,
 		getDashboard,
 		getModPatchSummaries,
+		getPathcSummary,
 		importModVariant,
 		launchGame,
 		moveModInLoadOrder,
 		resetActiveMods,
+		repackPathc,
 		restoreVanilla,
 		scanModFolder,
 		setModClassification,
@@ -42,6 +45,8 @@
 		type ModKind,
 		type ModPatchSummary,
 		type ModRecord,
+		type PathcRepackResult,
+		type PathcSummary,
 		type ScanResult
 	} from '$lib/desktop-api';
 	import { Badge } from '$lib/components/ui/badge';
@@ -66,11 +71,16 @@
 
 	let dashboard = $state<DashboardData | null>(null);
 	let applyPreview = $state<ApplyPreview | null>(null);
+	let pathcSummary = $state<PathcSummary | null>(null);
+	let pathcResult = $state<PathcRepackResult | null>(null);
 	let selectedPatchModId = $state<string | null>(null);
 	let patchSummaries = $state<ModPatchSummary[]>([]);
 	let scanResults = $state<ScanResult[]>([]);
 	let lastApplyResult = $state<ApplyResult | null>(null);
 	let gamePathInput = $state('');
+	let pathcPathInput = $state('');
+	let pathcLookupInput = $state('/ui/texture/cd_itemslot_00.dds');
+	let pathcFolderInput = $state('');
 	let scanFolderPath = $state('');
 	let search = $state('');
 	let filter = $state<Filter>('all');
@@ -86,6 +96,8 @@
 		applying: false,
 		previewing: false,
 		patches: false,
+		pathc: false,
+		repackingPathc: false,
 		restoring: false,
 		resetting: false,
 		launching: false,
@@ -129,6 +141,9 @@
 		try {
 			dashboard = await getDashboard();
 			gamePathInput = dashboard.status.gameInstall?.packagesPath ?? gamePathInput;
+			pathcPathInput = dashboard.status.gameInstall?.packagesPath
+				? `${dashboard.status.gameInstall.packagesPath}/meta/0.pathc`
+				: pathcPathInput;
 			if (!selectedPatchModId && orderedJsonMods.length > 0) {
 				selectedPatchModId = orderedJsonMods[0].id;
 			}
@@ -137,10 +152,30 @@
 			}
 			await refreshPatchSummaries();
 			await refreshPreview();
+			await refreshPathcSummary();
 		} catch (error) {
 			setError(error, 'Could not load the mod manager dashboard');
 		} finally {
 			busy.boot = false;
+		}
+	}
+
+	async function refreshPathcSummary() {
+		if (!pathcPathInput && !dashboard?.status.gameInstall) {
+			pathcSummary = null;
+			return;
+		}
+
+		busy.pathc = true;
+		try {
+			pathcSummary = await getPathcSummary(pathcPathInput || null, pathcLookupInput.trim() ? [pathcLookupInput.trim()] : []);
+		} catch (error) {
+			pathcSummary = null;
+			if (!toMessage(error).includes('Set the Crimson Desert game path first')) {
+				setError(error, 'Could not inspect PATHC metadata');
+			}
+		} finally {
+			busy.pathc = false;
 		}
 	}
 
@@ -272,6 +307,34 @@
 		}
 	}
 
+	async function choosePathcFile() {
+		const selected = await open({
+			multiple: false,
+			directory: false,
+			filters: [{ name: 'PATHC files', extensions: ['pathc'] }],
+			defaultPath: pathcPathInput || gamePathInput || undefined,
+			title: 'Choose a .pathc file'
+		});
+
+		if (typeof selected === 'string') {
+			pathcPathInput = selected;
+			await refreshPathcSummary();
+		}
+	}
+
+	async function choosePathcFolder() {
+		const selected = await open({
+			multiple: false,
+			directory: true,
+			defaultPath: pathcFolderInput || scanFolderPath || undefined,
+			title: 'Choose a folder containing DDS files'
+		});
+
+		if (typeof selected === 'string') {
+			pathcFolderInput = selected;
+		}
+	}
+
 	async function scanFolder(path: string) {
 		busy.scanningMods = true;
 		clearMessage();
@@ -377,6 +440,25 @@
 			setError(error, 'Could not launch the game');
 		} finally {
 			busy.launching = false;
+		}
+	}
+
+	async function runPathcRepack() {
+		if (!pathcFolderInput.trim()) {
+			toast.info('Choose a DDS folder first.');
+			return;
+		}
+
+		clearMessage();
+		busy.repackingPathc = true;
+		try {
+			pathcResult = await repackPathc(pathcPathInput || null, pathcFolderInput.trim());
+			await refreshPathcSummary();
+			toast.success(`Repacked PATHC with ${pathcResult.processedCount} DDS file(s).`);
+		} catch (error) {
+			setError(error, 'Could not repack PATHC');
+		} finally {
+			busy.repackingPathc = false;
 		}
 	}
 
@@ -1025,15 +1107,90 @@
 		<section id="advanced" class="scroll-mt-24 space-y-4 pb-8">
 			<div class="space-y-2">
 				<p class="text-muted-foreground text-xs font-medium uppercase tracking-[0.24em]">Advanced</p>
-				<h2 class="text-2xl font-semibold tracking-tight">Research lane</h2>
+				<h2 class="text-2xl font-semibold tracking-tight">PATHC and DDS workflow</h2>
 			</div>
 			<Card.Root>
 				<Card.Header>
-					<Card.Title class="flex items-center gap-2"><Archive class="size-5" /> PATHC and raw tooling later</Card.Title>
+					<Card.Title class="flex items-center gap-2"><Image class="size-5" /> PATHC texture index</Card.Title>
 					<Card.Description>
-						The local tool repos are now folded into the product direction. PATHC and raw workflows will live here after JSON, precompiled, and language parity.
+						Inspect `0.pathc`, verify virtual-path lookups, and repack a DDS folder into the PATHC index with a `.bak` safety backup.
 					</Card.Description>
 				</Card.Header>
+				<Card.Content class="space-y-4">
+					<div class="space-y-2">
+						<Label for="pathc-path">PATHC file</Label>
+						<div class="flex flex-wrap gap-2">
+							<Input id="pathc-path" bind:value={pathcPathInput} placeholder=".../meta/0.pathc" />
+							<Button variant="outline" onclick={choosePathcFile}>Browse</Button>
+							<Button variant="outline" disabled={busy.pathc} onclick={refreshPathcSummary}>{busy.pathc ? 'Refreshing...' : 'Refresh'}</Button>
+						</div>
+					</div>
+
+					<div class="space-y-2">
+						<Label for="pathc-lookup">Lookup virtual path</Label>
+						<div class="flex flex-wrap gap-2">
+							<Input id="pathc-lookup" bind:value={pathcLookupInput} placeholder="/ui/texture/example.dds" />
+							<Button variant="outline" disabled={busy.pathc} onclick={refreshPathcSummary}>Lookup</Button>
+						</div>
+					</div>
+
+					{#if pathcSummary}
+						<div class="grid gap-3 sm:grid-cols-3">
+							<div class="rounded-xl border bg-muted/20 p-4">
+								<p class="text-muted-foreground text-xs uppercase tracking-[0.18em]">DDS templates</p>
+								<p class="mt-2 text-2xl font-semibold">{pathcSummary.ddsTemplateCount}</p>
+							</div>
+							<div class="rounded-xl border bg-muted/20 p-4">
+								<p class="text-muted-foreground text-xs uppercase tracking-[0.18em]">Hashes</p>
+								<p class="mt-2 text-2xl font-semibold">{pathcSummary.hashCount}</p>
+							</div>
+							<div class="rounded-xl border bg-muted/20 p-4">
+								<p class="text-muted-foreground text-xs uppercase tracking-[0.18em]">Collisions</p>
+								<p class="mt-2 text-2xl font-semibold">{pathcSummary.collisionPathCount}</p>
+							</div>
+						</div>
+
+						{#if pathcSummary.lookups.length > 0}
+							<ScrollArea.Root class="h-44 rounded-xl border">
+								<div class="divide-y">
+									{#each pathcSummary.lookups as lookup (lookup.virtualPath)}
+										<div class="space-y-2 px-4 py-3">
+											<div class="flex flex-wrap items-center gap-2">
+												<p class="text-sm font-medium break-all">{lookup.virtualPath}</p>
+												<Badge variant={lookup.found ? 'outline' : 'secondary'}>{lookup.found ? 'Found' : 'Missing'}</Badge>
+											</div>
+											<p class="text-muted-foreground text-xs">Hash: 0x{lookup.keyHash.toString(16).toUpperCase()}</p>
+											{#if lookup.found}
+												<p class="text-muted-foreground text-xs">
+													DDS {lookup.directDdsIndex} / {lookup.width}x{lookup.height} / mip {lookup.mipCount} / {lookup.formatLabel}
+												</p>
+											{/if}
+										</div>
+									{/each}
+								</div>
+							</ScrollArea.Root>
+						{/if}
+					{/if}
+
+					<div class="space-y-2">
+						<Label for="pathc-folder">DDS source folder</Label>
+						<div class="flex flex-wrap gap-2">
+							<Input id="pathc-folder" bind:value={pathcFolderInput} placeholder="Folder containing DDS files" />
+							<Button variant="outline" onclick={choosePathcFolder}>Choose folder</Button>
+							<Button disabled={busy.repackingPathc} onclick={runPathcRepack}>{busy.repackingPathc ? 'Repacking...' : 'Repack PATHC'}</Button>
+						</div>
+					</div>
+
+					{#if pathcResult}
+						<Alert.Root>
+							<Info class="size-4" />
+							<Alert.Title>Last PATHC repack</Alert.Title>
+							<Alert.Description>
+								Processed {pathcResult.processedCount} DDS file(s), updated {pathcResult.updatedCount} hash entries, added {pathcResult.addedTemplateCount} new DDS templates. Backup: {pathcResult.backupPath}
+							</Alert.Description>
+						</Alert.Root>
+					{/if}
+				</Card.Content>
 			</Card.Root>
 		</section>
 	</div>

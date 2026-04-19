@@ -3,6 +3,7 @@ mod error;
 mod game;
 mod models;
 mod mods;
+mod pathc;
 mod patcher;
 mod util;
 
@@ -18,7 +19,7 @@ use error::{AppError, ErrorPayload};
 use game::{
     detect_packages_dir, inspect_game_install, launch_game, resolve_to_packages_dir, LaunchResult,
 };
-use models::{ApplyPreview, ApplyResult, DashboardData, GameInstallInfo, ModKind, ModPatchSummary, ModRecord, ScanResult, StatusSummary};
+use models::{ApplyPreview, ApplyResult, DashboardData, GameInstallInfo, ModKind, ModPatchSummary, ModRecord, PathcRepackResult, PathcSummary, ScanResult, StatusSummary};
 use tauri::{AppHandle, Manager, State};
 
 const SETTINGS_GAME_PATH: &str = "game_packages_path";
@@ -420,6 +421,60 @@ fn launch_game_command(state: State<'_, AppState>) -> Result<LaunchResult, Error
     Ok(LaunchResult { launched: true })
 }
 
+#[tauri::command]
+fn get_pathc_summary_command(
+    path: Option<String>,
+    lookups: Vec<String>,
+    state: State<'_, AppState>,
+) -> Result<PathcSummary, ErrorPayload> {
+    let connection = state.connection().map_err(ErrorPayload::from)?;
+    let resolved_path = if let Some(path) = path.filter(|value| !value.trim().is_empty()) {
+        PathBuf::from(path)
+    } else {
+        let packages_dir = saved_game_path(&connection)
+            .map_err(ErrorPayload::from)?
+            .ok_or_else(|| ErrorPayload {
+                message: "Set the Crimson Desert game path first or choose a .pathc file.".to_string(),
+            })?;
+        packages_dir.join("meta").join("0.pathc")
+    };
+
+    pathc::summarize_pathc(&resolved_path, &lookups).map_err(ErrorPayload::from)
+}
+
+#[tauri::command]
+fn repack_pathc_command(
+    path: Option<String>,
+    folder_path: String,
+    state: State<'_, AppState>,
+) -> Result<PathcRepackResult, ErrorPayload> {
+    let _guard = state.operation_lock.lock().map_err(|_| ErrorPayload {
+        message: "Operation lock poisoned".to_string(),
+    })?;
+    let connection = state.connection().map_err(ErrorPayload::from)?;
+    let resolved_path = if let Some(path) = path.filter(|value| !value.trim().is_empty()) {
+        PathBuf::from(path)
+    } else {
+        let packages_dir = saved_game_path(&connection)
+            .map_err(ErrorPayload::from)?
+            .ok_or_else(|| ErrorPayload {
+                message: "Set the Crimson Desert game path first or choose a .pathc file.".to_string(),
+            })?;
+        packages_dir.join("meta").join("0.pathc")
+    };
+
+    let result = pathc::repack_pathc(&resolved_path, Path::new(&folder_path)).map_err(ErrorPayload::from)?;
+    insert_history(
+        &connection,
+        "pathc_repack",
+        "ok",
+        &format!("Repacked PATHC with {} DDS files", result.processed_count),
+        None,
+    )
+    .map_err(ErrorPayload::from)?;
+    Ok(result)
+}
+
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     tauri::Builder::default()
@@ -448,6 +503,8 @@ pub fn run() {
             restore_vanilla_command,
             reset_active_mods_command,
             launch_game_command,
+            get_pathc_summary_command,
+            repack_pathc_command,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

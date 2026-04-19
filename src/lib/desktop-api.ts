@@ -96,6 +96,40 @@ export type ModPatchSummary = {
 	enabled: boolean;
 };
 
+export type PathcLookupResult = {
+	virtualPath: string;
+	keyHash: number;
+	found: boolean;
+	directDdsIndex: number | null;
+	width: number | null;
+	height: number | null;
+	mipCount: number | null;
+	formatLabel: string | null;
+	m1: number | null;
+	m2: number | null;
+	m3: number | null;
+	m4: number | null;
+};
+
+export type PathcSummary = {
+	path: string;
+	ddsTemplateCount: number;
+	hashCount: number;
+	collisionPathCount: number;
+	directMappingCount: number;
+	collisionMappingCount: number;
+	unknownMappingCount: number;
+	lookups: PathcLookupResult[];
+};
+
+export type PathcRepackResult = {
+	pathcPath: string;
+	backupPath: string;
+	processedCount: number;
+	updatedCount: number;
+	addedTemplateCount: number;
+};
+
 export type StatusSummary = {
 	gameInstall: GameInstallInfo | null;
 	selectedLanguage: string | null;
@@ -179,4 +213,12 @@ export async function resetActiveMods() {
 
 export async function launchGame() {
 	return invoke<LaunchResult>('launch_game_command');
+}
+
+export async function getPathcSummary(path: string | null, lookups: string[]) {
+	return invoke<PathcSummary>('get_pathc_summary_command', { path, lookups });
+}
+
+export async function repackPathc(path: string | null, folderPath: string) {
+	return invoke<PathcRepackResult>('repack_pathc_command', { path, folderPath });
 }

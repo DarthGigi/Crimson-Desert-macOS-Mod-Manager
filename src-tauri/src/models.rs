@@ -201,3 +201,43 @@ pub struct DashboardData {
     pub enabled: Vec<ModRecord>,
     pub disabled: Vec<ModRecord>,
 }
+
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct PathcLookupResult {
+    pub virtual_path: String,
+    pub key_hash: u32,
+    pub found: bool,
+    pub direct_dds_index: Option<usize>,
+    pub width: Option<u32>,
+    pub height: Option<u32>,
+    pub mip_count: Option<u32>,
+    pub format_label: Option<String>,
+    pub m1: Option<u32>,
+    pub m2: Option<u32>,
+    pub m3: Option<u32>,
+    pub m4: Option<u32>,
+}
+
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct PathcSummary {
+    pub path: String,
+    pub dds_template_count: usize,
+    pub hash_count: usize,
+    pub collision_path_count: usize,
+    pub direct_mapping_count: usize,
+    pub collision_mapping_count: usize,
+    pub unknown_mapping_count: usize,
+    pub lookups: Vec<PathcLookupResult>,
+}
+
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct PathcRepackResult {
+    pub pathc_path: String,
+    pub backup_path: String,
+    pub processed_count: usize,
+    pub updated_count: usize,
+    pub added_template_count: usize,
+}
