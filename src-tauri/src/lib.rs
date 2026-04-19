@@ -19,7 +19,7 @@ use error::{AppError, ErrorPayload};
 use game::{
     detect_packages_dir, inspect_game_install, launch_game, resolve_to_packages_dir, LaunchResult,
 };
-use models::{ApplyPreview, ApplyResult, DashboardData, ExtractPreview, ExtractResult, GameInstallInfo, HistoryEntry, ModKind, ModPatchSummary, ModRecord, PathcRepackResult, PathcSummary, ScanResult, StatusSummary};
+use models::{ApplyPreview, ApplyResult, DashboardData, ExtractPreview, ExtractResult, GameInstallInfo, HistoryEntry, ModKind, ModPatchSummary, ModRecord, PathcRepackResult, PathcSummary, ScanResult, StatusSummary, VirtualFileMatch};
 use tauri::{AppHandle, Manager, State};
 
 const SETTINGS_GAME_PATH: &str = "game_packages_path";
@@ -633,6 +633,23 @@ fn extract_virtual_file_command(
 }
 
 #[tauri::command]
+fn search_virtual_files_command(
+    query: String,
+    source_group: Option<String>,
+    limit: Option<usize>,
+    state: State<'_, AppState>,
+) -> Result<Vec<VirtualFileMatch>, ErrorPayload> {
+    let connection = state.connection().map_err(ErrorPayload::from)?;
+    let packages_dir = saved_game_path(&connection)
+        .map_err(ErrorPayload::from)?
+        .ok_or_else(|| ErrorPayload {
+            message: "Set the Crimson Desert game path first.".to_string(),
+        })?;
+    patcher::search_virtual_files(&packages_dir, &query, source_group.as_deref(), limit.unwrap_or(100))
+        .map_err(ErrorPayload::from)
+}
+
+#[tauri::command]
 fn get_history_command(
     limit: Option<usize>,
     state: State<'_, AppState>,
@@ -675,6 +692,7 @@ pub fn run() {
             get_virtual_file_preview_command,
             extract_virtual_file_command,
             get_history_command,
+            search_virtual_files_command,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

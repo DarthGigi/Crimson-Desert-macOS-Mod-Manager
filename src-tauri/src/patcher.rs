@@ -5,7 +5,7 @@ use std::path::Path;
 use lz4_flex::block;
 
 use crate::error::{AppError, AppResult};
-use crate::models::{ApplyFileResult, ApplyPreview, ApplyPreviewFile, ApplyResult, ExtractPreview, ExtractResult, ManagedGroupRecord, ModChange, ModKind, ModRecord};
+use crate::models::{ApplyFileResult, ApplyPreview, ApplyPreviewFile, ApplyResult, ExtractPreview, ExtractResult, ManagedGroupRecord, ModChange, ModKind, ModRecord, VirtualFileMatch};
 use crate::mods::{load_enabled_manifests, merged_changes};
 use crate::util::now_iso_string;
 
@@ -641,6 +641,42 @@ pub fn extract_virtual_file(
         output_path: output_path.display().to_string(),
         decompressed_size: decompressed.len(),
     })
+}
+
+pub fn search_virtual_files(
+    game_dir: &Path,
+    query: &str,
+    source_group: Option<&str>,
+    limit: usize,
+) -> AppResult<Vec<VirtualFileMatch>> {
+    let needle = query.trim().to_lowercase();
+    if needle.is_empty() {
+        return Ok(Vec::new());
+    }
+
+    let mut cache = BTreeMap::new();
+    let mut matches = Vec::new();
+    for group in source_group_candidates(game_dir, source_group)? {
+        let (_, full_index) = load_group_indexes(game_dir, &group, &mut cache)?;
+        for info in full_index.values() {
+            if !info.full_path.to_lowercase().contains(&needle) {
+                continue;
+            }
+            matches.push(VirtualFileMatch {
+                source_group: group.clone(),
+                virtual_path: info.full_path.clone(),
+                source_paz_index: info.record.paz_index,
+                compressed_size: info.record.comp_size as usize,
+                decompressed_size: info.record.decomp_size as usize,
+                flags: info.record.flags,
+            });
+            if matches.len() >= limit {
+                return Ok(matches);
+            }
+        }
+    }
+
+    Ok(matches)
 }
 
 fn load_group_indexes<'a>(

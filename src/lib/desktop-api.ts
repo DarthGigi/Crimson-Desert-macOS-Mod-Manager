@@ -158,6 +158,15 @@ export type HistoryEntry = {
 	createdAt: string;
 };
 
+export type VirtualFileMatch = {
+	sourceGroup: string;
+	virtualPath: string;
+	sourcePazIndex: number;
+	compressedSize: number;
+	decompressedSize: number;
+	flags: number;
+};
+
 export type StatusSummary = {
 	gameInstall: GameInstallInfo | null;
 	selectedLanguage: string | null;
@@ -267,4 +276,8 @@ export async function extractVirtualFile(virtualPath: string, sourceGroup: strin
 
 export async function getHistory(limit = 50) {
 	return invoke<HistoryEntry[]>('get_history_command', { limit });
+}
+
+export async function searchVirtualFiles(query: string, sourceGroup: string | null, limit = 100) {
+	return invoke<VirtualFileMatch[]>('search_virtual_files_command', { query, sourceGroup, limit });
 }

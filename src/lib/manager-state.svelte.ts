@@ -8,6 +8,7 @@ import {
 	getHistory,
 	getModPatchSummaries,
 	getPathcSummary,
+	searchVirtualFiles,
 	getVirtualFilePreview,
 	importModVariant,
 	launchGame,
@@ -24,6 +25,7 @@ import {
 	type PathcRepackResult,
 	type PathcSummary,
 	type ScanResult,
+	type VirtualFileMatch,
 	fixEverything,
 	repackPathc,
 	resetActiveMods,
@@ -51,6 +53,7 @@ class ManagerState {
 	extractPreview = $state<ExtractPreview | null>(null);
 	extractResult = $state<ExtractResult | null>(null);
 	historyEntries = $state<HistoryEntry[]>([]);
+	virtualFileMatches = $state<VirtualFileMatch[]>([]);
 	patchSummaries = $state<ModPatchSummary[]>([]);
 	scanResults = $state<ScanResult[]>([]);
 	lastApplyResult = $state<ApplyResult | null>(null);
@@ -73,6 +76,7 @@ class ManagerState {
 		pathc: false,
 		repackingPathc: false,
 		extracting: false,
+		searchingFiles: false,
 		toggling: ''
 	});
 
@@ -549,6 +553,18 @@ class ManagerState {
 			this.setError(error, 'Could not inspect virtual file');
 		} finally {
 			this.busy.extracting = false;
+		}
+	}
+
+	async searchVirtualFiles(query: string, sourceGroup: string | null, limit = 100) {
+		this.busy.searchingFiles = true;
+		try {
+			this.virtualFileMatches = await searchVirtualFiles(query, sourceGroup, limit);
+		} catch (error) {
+			this.virtualFileMatches = [];
+			this.setError(error, 'Could not search virtual files');
+		} finally {
+			this.busy.searchingFiles = false;
 		}
 	}
 

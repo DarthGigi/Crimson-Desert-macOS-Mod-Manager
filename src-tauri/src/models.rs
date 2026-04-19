@@ -269,6 +269,17 @@ pub struct ExtractResult {
 
 #[derive(Debug, Clone, Serialize)]
 #[serde(rename_all = "camelCase")]
+pub struct VirtualFileMatch {
+    pub source_group: String,
+    pub virtual_path: String,
+    pub source_paz_index: u16,
+    pub compressed_size: usize,
+    pub decompressed_size: usize,
+    pub flags: u16,
+}
+
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
 pub struct HistoryEntry {
     pub id: i64,
     pub action: String,
