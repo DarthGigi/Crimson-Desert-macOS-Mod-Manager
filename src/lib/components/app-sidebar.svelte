@@ -1,11 +1,10 @@
 <script lang="ts">
 	import { page } from '$app/state';
 	import { HardDriveDownload } from '@lucide/svelte';
-	import { Badge } from '$lib/components/ui/badge';
 	import * as Sidebar from '$lib/components/ui/sidebar';
 	import { appNavGroups, appSidebarMeta } from '$lib/navigation';
 
-	const currentHash = $derived(page.url.hash || '#overview');
+	const currentPath = $derived(page.url.pathname);
 </script>
 
 <Sidebar.Root collapsible="icon" variant="inset">
@@ -14,20 +13,26 @@
 			<Sidebar.MenuItem>
 				<Sidebar.MenuButton size="lg" isActive>
 					{#snippet child({ props })}
-						<a href="#overview" {...props}>
-							<div class="bg-sidebar-primary text-sidebar-primary-foreground flex size-9 items-center justify-center rounded-xl border border-white/10">
+						<a href="/" {...props}>
+							<div
+								class="flex size-9 items-center justify-center rounded-xl border border-white/10 bg-sidebar-primary text-sidebar-primary-foreground"
+							>
 								<appSidebarMeta.icon class="size-4" />
 							</div>
 							<div class="grid flex-1 text-left text-sm leading-tight">
 								<span class="truncate font-medium">{appSidebarMeta.title}</span>
-								<span class="truncate text-xs text-sidebar-foreground/70">{appSidebarMeta.subtitle}</span>
+								<span class="truncate text-xs text-sidebar-foreground/70"
+									>{appSidebarMeta.subtitle}</span
+								>
 							</div>
 						</a>
 					{/snippet}
 				</Sidebar.MenuButton>
 			</Sidebar.MenuItem>
 		</Sidebar.Menu>
-		<p class="px-2 text-xs leading-5 text-sidebar-foreground/70 group-data-[collapsible=icon]:hidden">
+		<p
+			class="px-2 text-xs leading-5 text-sidebar-foreground/70 group-data-[collapsible=icon]:hidden"
+		>
 			{appSidebarMeta.description}
 		</p>
 	</Sidebar.Header>
@@ -40,9 +45,12 @@
 					<Sidebar.Menu>
 						{#each group.items as item (item.id)}
 							<Sidebar.MenuItem>
-								<Sidebar.MenuButton isActive={currentHash === `#${item.id}`} tooltipContent={item.label}>
+								<Sidebar.MenuButton
+									isActive={currentPath === item.href}
+									tooltipContent={item.label}
+								>
 									{#snippet child({ props })}
-										<a href={`#${item.id}`} {...props}>
+										<a href={item.href} {...props}>
 											<item.icon />
 											<span>{item.label}</span>
 										</a>
@@ -64,7 +72,7 @@
 			<Sidebar.MenuItem>
 				<Sidebar.MenuButton tooltipContent="Import folder">
 					{#snippet child({ props })}
-						<a href="#data-mods" {...props}>
+						<a href="/data-mods" {...props}>
 							<HardDriveDownload />
 							<span>Import Folder</span>
 						</a>
@@ -72,9 +80,14 @@
 				</Sidebar.MenuButton>
 			</Sidebar.MenuItem>
 			<Sidebar.MenuItem class="group-data-[collapsible=icon]:hidden">
-				<div class="rounded-xl border border-sidebar-border bg-sidebar-accent/40 p-3 text-xs leading-5 text-sidebar-foreground/75">
+				<div
+					class="rounded-xl border border-sidebar-border bg-sidebar-accent/40 p-3 text-xs leading-5 text-sidebar-foreground/75"
+				>
 					<p class="font-medium text-sidebar-foreground">Current focus</p>
-					<p class="mt-1">Sidebar shell is live. Dynamic groups, load order, language mods, and precompiled mods are next.</p>
+					<p class="mt-1">
+						Routed workspace is live. Use the sidebar to move between mod types, apply tools, and
+						advanced workflows.
+					</p>
 				</div>
 			</Sidebar.MenuItem>
 		</Sidebar.Menu>
