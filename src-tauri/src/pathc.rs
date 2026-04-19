@@ -99,7 +99,11 @@ pub fn repack_pathc(pathc_path: &Path, folder_path: &Path) -> AppResult<PathcRep
         let dds_record = create_dds_record(&dds_data, pathc.header.dds_record_size as usize)?;
         let metadata = dds_metadata(&dds_data)?;
 
-        let dds_index = match pathc.dds_records.iter().position(|record| *record == dds_record) {
+        let dds_index = match pathc
+            .dds_records
+            .iter()
+            .position(|record| *record == dds_record)
+        {
             Some(index) => index as u32,
             None => {
                 pathc.dds_records.push(dds_record);
@@ -107,7 +111,12 @@ pub fn repack_pathc(pathc_path: &Path, folder_path: &Path) -> AppResult<PathcRep
             }
         };
 
-        if update_entry(&mut pathc, &virtual_path, dds_index, (metadata.3, metadata.4, metadata.5, 0)) {
+        if update_entry(
+            &mut pathc,
+            &virtual_path,
+            dds_index,
+            (metadata.3, metadata.4, metadata.5, 0),
+        ) {
             updated_count += 1;
         }
         processed_count += 1;
@@ -126,14 +135,20 @@ pub fn repack_pathc(pathc_path: &Path, folder_path: &Path) -> AppResult<PathcRep
         backup_path: backup_path.display().to_string(),
         processed_count,
         updated_count,
-        added_template_count: pathc.dds_records.len().saturating_sub(original_template_count),
+        added_template_count: pathc
+            .dds_records
+            .len()
+            .saturating_sub(original_template_count),
     })
 }
 
 fn read_pathc(path: &Path) -> AppResult<PathcFile> {
     let raw = fs::read(path)?;
     if raw.len() < 0x1C {
-        return Err(AppError::Other(format!("{} is too small to be a valid .pathc file", path.display())));
+        return Err(AppError::Other(format!(
+            "{} is too small to be a valid .pathc file",
+            path.display()
+        )));
     }
 
     let header = PathcHeader {
@@ -157,7 +172,9 @@ fn read_pathc(path: &Path) -> AppResult<PathcFile> {
     let collision_blob_off = collision_table_off + collision_table_size;
     let collision_blob_end = collision_blob_off + header.collision_blob_size as usize;
     if collision_blob_end > raw.len() {
-        return Err(AppError::Other("PATHC collision blob extends beyond file size".to_string()));
+        return Err(AppError::Other(
+            "PATHC collision blob extends beyond file size".to_string(),
+        ));
     }
 
     let mut dds_records = Vec::new();
@@ -165,7 +182,9 @@ fn read_pathc(path: &Path) -> AppResult<PathcFile> {
         let start = dds_table_off + index * header.dds_record_size as usize;
         let end = start + header.dds_record_size as usize;
         if end > raw.len() {
-            return Err(AppError::Other("DDS template table is truncated".to_string()));
+            return Err(AppError::Other(
+                "DDS template table is truncated".to_string(),
+            ));
         }
         dds_records.push(raw[start..end].to_vec());
     }
@@ -324,8 +343,16 @@ fn lookup_path(pathc: &PathcFile, virtual_path: &str) -> AppResult<PathcLookupRe
     Ok(result)
 }
 
-fn update_entry(pathc: &mut PathcFile, virtual_path: &str, dds_index: u32, m: (u32, u32, u32, u32)) -> bool {
-    let target_hash = hashlittle(normalize_path(virtual_path).to_lowercase().as_bytes(), HASH_INITVAL);
+fn update_entry(
+    pathc: &mut PathcFile,
+    virtual_path: &str,
+    dds_index: u32,
+    m: (u32, u32, u32, u32),
+) -> bool {
+    let target_hash = hashlittle(
+        normalize_path(virtual_path).to_lowercase().as_bytes(),
+        HASH_INITVAL,
+    );
     let idx = match pathc.key_hashes.binary_search(&target_hash) {
         Ok(index) => index,
         Err(index) => {
@@ -399,10 +426,16 @@ fn dds_metadata(data: &[u8]) -> AppResult<(u32, u32, u32, u32, u32, u32, String)
     let fourcc = &data[84..88];
     let (format_label, block_bytes, bits_per_pixel) = if fourcc == b"DX10" && data.len() >= 148 {
         let dxgi = read_u32(data, 128)?;
-        (format!("DX10/{dxgi}"), dxgi_block_bytes(dxgi), dxgi_bits_per_pixel(dxgi))
+        (
+            format!("DX10/{dxgi}"),
+            dxgi_block_bytes(dxgi),
+            dxgi_bits_per_pixel(dxgi),
+        )
     } else {
         (
-            String::from_utf8_lossy(fourcc).trim_end_matches('\0').to_string(),
+            String::from_utf8_lossy(fourcc)
+                .trim_end_matches('\0')
+                .to_string(),
             fourcc_block_bytes(fourcc),
             if read_u32(data, 80)? & 0x40 != 0 {
                 read_u32(data, 88)?
@@ -430,7 +463,15 @@ fn dds_metadata(data: &[u8]) -> AppResult<(u32, u32, u32, u32, u32, u32, String)
         current_height = (current_height / 2).max(1);
     }
 
-    Ok((width, height, mip_count, sizes[0], sizes[1], sizes[2], format_label))
+    Ok((
+        width,
+        height,
+        mip_count,
+        sizes[0],
+        sizes[1],
+        sizes[2],
+        format_label,
+    ))
 }
 
 fn dds_record_metadata(record: &[u8]) -> AppResult<(u32, u32, u32, String)> {
@@ -439,7 +480,12 @@ fn dds_record_metadata(record: &[u8]) -> AppResult<(u32, u32, u32, String)> {
 }
 
 fn normalize_path(path: &str) -> String {
-    let cleaned = path.replace('\\', "/").trim().trim_start_matches('/').trim_end_matches('/').to_string();
+    let cleaned = path
+        .replace('\\', "/")
+        .trim()
+        .trim_start_matches('/')
+        .trim_end_matches('/')
+        .to_string();
     format!("/{cleaned}")
 }
 
@@ -473,9 +519,9 @@ fn read_c_string(data: &[u8], offset: usize) -> String {
 }
 
 fn read_u32(data: &[u8], offset: usize) -> AppResult<u32> {
-    let slice = data.get(offset..offset + 4).ok_or_else(|| {
-        AppError::Other(format!("PATHC read out of range at offset {offset}"))
-    })?;
+    let slice = data
+        .get(offset..offset + 4)
+        .ok_or_else(|| AppError::Other(format!("PATHC read out of range at offset {offset}")))?;
     Ok(u32::from_le_bytes([slice[0], slice[1], slice[2], slice[3]]))
 }
 
@@ -517,9 +563,15 @@ fn hashlittle(data: &[u8], initval: u32) -> u32 {
     let mut offset = 0usize;
 
     while remaining > 12 {
-        a = a.wrapping_add(u32::from_le_bytes(data[offset..offset + 4].try_into().unwrap()));
-        b = b.wrapping_add(u32::from_le_bytes(data[offset + 4..offset + 8].try_into().unwrap()));
-        c = c.wrapping_add(u32::from_le_bytes(data[offset + 8..offset + 12].try_into().unwrap()));
+        a = a.wrapping_add(u32::from_le_bytes(
+            data[offset..offset + 4].try_into().unwrap(),
+        ));
+        b = b.wrapping_add(u32::from_le_bytes(
+            data[offset + 4..offset + 8].try_into().unwrap(),
+        ));
+        c = c.wrapping_add(u32::from_le_bytes(
+            data[offset + 8..offset + 12].try_into().unwrap(),
+        ));
         a = a.wrapping_sub(c) ^ rot32(c, 4);
         c = c.wrapping_add(b);
         b = b.wrapping_sub(a) ^ rot32(a, 6);
@@ -540,17 +592,32 @@ fn hashlittle(data: &[u8], initval: u32) -> u32 {
     tail[..remaining].copy_from_slice(&data[offset..offset + remaining]);
     match remaining {
         12 => c = c.wrapping_add(u32::from_le_bytes(tail[8..12].try_into().unwrap())),
-        9..=11 => c = c.wrapping_add(u32::from_le_bytes(tail[8..12].try_into().unwrap()) & (0xFFFF_FFFF >> (8 * (12 - remaining)))),
+        9..=11 => {
+            c = c.wrapping_add(
+                u32::from_le_bytes(tail[8..12].try_into().unwrap())
+                    & (0xFFFF_FFFF >> (8 * (12 - remaining))),
+            )
+        }
         _ => {}
     }
     match remaining {
         8..=12 => b = b.wrapping_add(u32::from_le_bytes(tail[4..8].try_into().unwrap())),
-        5..=7 => b = b.wrapping_add(u32::from_le_bytes(tail[4..8].try_into().unwrap()) & (0xFFFF_FFFF >> (8 * (8 - remaining)))),
+        5..=7 => {
+            b = b.wrapping_add(
+                u32::from_le_bytes(tail[4..8].try_into().unwrap())
+                    & (0xFFFF_FFFF >> (8 * (8 - remaining))),
+            )
+        }
         _ => {}
     }
     match remaining {
         4..=12 => a = a.wrapping_add(u32::from_le_bytes(tail[0..4].try_into().unwrap())),
-        1..=3 => a = a.wrapping_add(u32::from_le_bytes(tail[0..4].try_into().unwrap()) & (0xFFFF_FFFF >> (8 * (4 - remaining)))),
+        1..=3 => {
+            a = a.wrapping_add(
+                u32::from_le_bytes(tail[0..4].try_into().unwrap())
+                    & (0xFFFF_FFFF >> (8 * (4 - remaining))),
+            )
+        }
         0 => return c,
         _ => {}
     }
@@ -576,12 +643,18 @@ fn hashlittle(data: &[u8], initval: u32) -> u32 {
 mod tests {
     use super::*;
 
-    const GAME_PATHC: &str = "/Users/gigi/Games/Crimson Desert.app/Contents/Resources/packages/meta/0.pathc";
-    const DDS_FOLDER: &str = "/Users/gigi/Downloads/CD Mods/Better_Inventory_UI_Compatible/files/0012";
+    const GAME_PATHC: &str =
+        "/Users/gigi/Games/Crimson Desert.app/Contents/Resources/packages/meta/0.pathc";
+    const DDS_FOLDER: &str =
+        "/Users/gigi/Downloads/CD Mods/Better_Inventory_UI_Compatible/files/0012";
 
     #[test]
     fn summarizes_real_pathc_file() {
-        let summary = summarize_pathc(Path::new(GAME_PATHC), &["/ui/texture/cd_itemslot_00.dds".to_string()]).unwrap();
+        let summary = summarize_pathc(
+            Path::new(GAME_PATHC),
+            &["/ui/texture/cd_itemslot_00.dds".to_string()],
+        )
+        .unwrap();
         assert!(summary.dds_template_count > 0);
         assert!(summary.hash_count > 0);
         assert_eq!(summary.lookups.len(), 1);

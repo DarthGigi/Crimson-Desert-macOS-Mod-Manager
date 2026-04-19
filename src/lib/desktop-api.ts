@@ -240,7 +240,11 @@ export async function setSelectedLanguage(language: string | null) {
 	return invoke<DashboardData>('set_selected_language_command', { language });
 }
 
-export async function setModClassification(modId: string, modKind: ModKind, language: string | null) {
+export async function setModClassification(
+	modId: string,
+	modKind: ModKind,
+	language: string | null
+) {
 	return invoke<DashboardData>('set_mod_classification_command', { modId, modKind, language });
 }
 
@@ -292,8 +296,16 @@ export async function getVirtualFilePreview(virtualPath: string, sourceGroup: st
 	return invoke<ExtractPreview>('get_virtual_file_preview_command', { virtualPath, sourceGroup });
 }
 
-export async function extractVirtualFile(virtualPath: string, sourceGroup: string | null, outputDir: string) {
-	return invoke<ExtractResult>('extract_virtual_file_command', { virtualPath, sourceGroup, outputDir });
+export async function extractVirtualFile(
+	virtualPath: string,
+	sourceGroup: string | null,
+	outputDir: string
+) {
+	return invoke<ExtractResult>('extract_virtual_file_command', {
+		virtualPath,
+		sourceGroup,
+		outputDir
+	});
 }
 
 export async function getHistory(limit = 50) {
@@ -304,10 +316,24 @@ export async function searchVirtualFiles(query: string, sourceGroup: string | nu
 	return invoke<VirtualFileMatch[]>('search_virtual_files_command', { query, sourceGroup, limit });
 }
 
-export async function extractXmlEntry(virtualPath: string, sourceGroup: string | null, outputDir: string) {
+export async function extractXmlEntry(
+	virtualPath: string,
+	sourceGroup: string | null,
+	outputDir: string
+) {
 	return invoke<XmlPreview>('extract_xml_entry_command', { virtualPath, sourceGroup, outputDir });
 }
 
-export async function repackXmlEntry(virtualPath: string, sourceGroup: string | null, modifiedPath: string, outputPath: string | null) {
-	return invoke<XmlRepackResult>('repack_xml_entry_command', { virtualPath, sourceGroup, modifiedPath, outputPath });
+export async function repackXmlEntry(
+	virtualPath: string,
+	sourceGroup: string | null,
+	modifiedPath: string,
+	outputPath: string | null
+) {
+	return invoke<XmlRepackResult>('repack_xml_entry_command', {
+		virtualPath,
+		sourceGroup,
+		modifiedPath,
+		outputPath
+	});
 }

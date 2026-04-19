@@ -7,7 +7,11 @@ use chacha20::ChaCha20Legacy;
 use lz4_flex::block;
 
 use crate::error::{AppError, AppResult};
-use crate::models::{ApplyFileResult, ApplyPreview, ApplyPreviewFile, ApplyResult, ExtractPreview, ExtractResult, ManagedGroupRecord, ModChange, ModKind, ModRecord, VirtualFileMatch, XmlPreview, XmlRepackResult};
+use crate::models::{
+    ApplyFileResult, ApplyPreview, ApplyPreviewFile, ApplyResult, ExtractPreview, ExtractResult,
+    ManagedGroupRecord, ModChange, ModKind, ModRecord, VirtualFileMatch, XmlPreview,
+    XmlRepackResult,
+};
 use crate::mods::{load_enabled_manifests, merged_changes};
 use crate::util::now_iso_string;
 
@@ -329,7 +333,9 @@ pub fn apply_mods(
             record.enabled
                 && match record.mod_kind {
                     ModKind::PrecompiledOverlay | ModKind::BrowserRaw => is_dir_backed,
-                    ModKind::Language => is_dir_backed && record.language.as_deref() == selected_language,
+                    ModKind::Language => {
+                        is_dir_backed && record.language.as_deref() == selected_language
+                    }
                     ModKind::JsonData => false,
                 }
         })
@@ -361,7 +367,8 @@ pub fn apply_mods(
     let mut file_index_cache = BTreeMap::new();
 
     for (target, changes) in merged {
-        let (simple_index, full_index) = load_group_indexes(game_dir, &target.source_group, &mut file_index_cache)?;
+        let (simple_index, full_index) =
+            load_group_indexes(game_dir, &target.source_group, &mut file_index_cache)?;
         let Some(info) = resolve_game_file(&target.game_file, simple_index, full_index) else {
             file_results.push(ApplyFileResult {
                 game_file: target.game_file,
@@ -475,7 +482,10 @@ pub fn apply_mods(
     Ok(ApplyResult {
         mod_count: enabled_manifests.len() + enabled_precompiled.len(),
         target_file_count: file_results.len(),
-        overlay_file_count: overlay_files.len() + created_groups.len().saturating_sub(overlay_files.is_empty() as usize),
+        overlay_file_count: overlay_files.len()
+            + created_groups
+                .len()
+                .saturating_sub(overlay_files.is_empty() as usize),
         paz_size: paz_buffer.len(),
         pamt_size: json_pamt_size,
         created_groups: created_groups.clone(),
@@ -502,7 +512,9 @@ pub fn preview_apply(
             record.enabled
                 && match record.mod_kind {
                     ModKind::PrecompiledOverlay | ModKind::BrowserRaw => is_dir_backed,
-                    ModKind::Language => is_dir_backed && record.language.as_deref() == selected_language,
+                    ModKind::Language => {
+                        is_dir_backed && record.language.as_deref() == selected_language
+                    }
                     ModKind::JsonData => false,
                 }
         })
@@ -520,42 +532,45 @@ pub fn preview_apply(
             .collect();
         let overlap_count = count_overlaps(&changes);
 
-        let preview_file = match load_group_indexes(game_dir, &target.source_group, &mut file_index_cache) {
-            Ok((simple_index, full_index)) => {
-                match resolve_game_file(&target.game_file, simple_index, full_index) {
-                    Some(info) => ApplyPreviewFile {
-                        game_file: info.full_path.clone(),
-                        source_group: target.source_group,
-                        source_paz_index: Some(info.record.paz_index),
-                        change_count: changes.len(),
-                        overlap_count,
-                        source_mods,
-                        resolved: true,
-                        reason: None,
-                    },
-                    None => ApplyPreviewFile {
-                        game_file: target.game_file,
-                        source_group: target.source_group,
-                        source_paz_index: None,
-                        change_count: changes.len(),
-                        overlap_count,
-                        source_mods,
-                        resolved: false,
-                        reason: Some("Target file not found in the declared source group".to_string()),
-                    },
+        let preview_file =
+            match load_group_indexes(game_dir, &target.source_group, &mut file_index_cache) {
+                Ok((simple_index, full_index)) => {
+                    match resolve_game_file(&target.game_file, simple_index, full_index) {
+                        Some(info) => ApplyPreviewFile {
+                            game_file: info.full_path.clone(),
+                            source_group: target.source_group,
+                            source_paz_index: Some(info.record.paz_index),
+                            change_count: changes.len(),
+                            overlap_count,
+                            source_mods,
+                            resolved: true,
+                            reason: None,
+                        },
+                        None => ApplyPreviewFile {
+                            game_file: target.game_file,
+                            source_group: target.source_group,
+                            source_paz_index: None,
+                            change_count: changes.len(),
+                            overlap_count,
+                            source_mods,
+                            resolved: false,
+                            reason: Some(
+                                "Target file not found in the declared source group".to_string(),
+                            ),
+                        },
+                    }
                 }
-            }
-            Err(err) => ApplyPreviewFile {
-                game_file: target.game_file,
-                source_group: target.source_group,
-                source_paz_index: None,
-                change_count: changes.len(),
-                overlap_count,
-                source_mods,
-                resolved: false,
-                reason: Some(err.to_string()),
-            },
-        };
+                Err(err) => ApplyPreviewFile {
+                    game_file: target.game_file,
+                    source_group: target.source_group,
+                    source_paz_index: None,
+                    change_count: changes.len(),
+                    overlap_count,
+                    source_mods,
+                    resolved: false,
+                    reason: Some(err.to_string()),
+                },
+            };
 
         files.push(preview_file);
     }
@@ -633,12 +648,15 @@ pub fn extract_virtual_file(
     let preview = preview_virtual_file(game_dir, virtual_path, source_group)?;
     if !preview.resolved {
         return Err(AppError::NotFound(
-            preview.reason.unwrap_or_else(|| "Virtual file not found".to_string()),
+            preview
+                .reason
+                .unwrap_or_else(|| "Virtual file not found".to_string()),
         ));
     }
 
     let mut cache = BTreeMap::new();
-    let (simple_index, full_index) = load_group_indexes(game_dir, &preview.source_group, &mut cache)?;
+    let (simple_index, full_index) =
+        load_group_indexes(game_dir, &preview.source_group, &mut cache)?;
     let info = resolve_game_file(virtual_path, simple_index, full_index)
         .ok_or_else(|| AppError::NotFound(format!("Virtual file not found: {virtual_path}")))?;
 
@@ -712,18 +730,25 @@ pub fn extract_xml_entry(
     let preview = preview_virtual_file(game_dir, virtual_path, source_group)?;
     if !preview.resolved {
         return Err(AppError::NotFound(
-            preview.reason.unwrap_or_else(|| "Virtual file not found".to_string()),
+            preview
+                .reason
+                .unwrap_or_else(|| "Virtual file not found".to_string()),
         ));
     }
 
     let mut cache = BTreeMap::new();
-    let (simple_index, full_index) = load_group_indexes(game_dir, &preview.source_group, &mut cache)?;
+    let (simple_index, full_index) =
+        load_group_indexes(game_dir, &preview.source_group, &mut cache)?;
     let info = resolve_game_file(virtual_path, simple_index, full_index)
         .ok_or_else(|| AppError::NotFound(format!("Virtual file not found: {virtual_path}")))?;
     let src_paz = game_dir
         .join(&preview.source_group)
         .join(format!("{}.paz", info.record.paz_index));
-    let compressed = read_paz_slice(&src_paz, info.record.paz_offset as usize, info.record.comp_size as usize)?;
+    let compressed = read_paz_slice(
+        &src_paz,
+        info.record.paz_offset as usize,
+        info.record.comp_size as usize,
+    )?;
     let mut data = compressed;
     let encrypted = info.record.encrypted(&info.filename);
     let compressed_flag = info.record.compression_type() == 2;
@@ -764,12 +789,15 @@ pub fn repack_xml_entry(
     let preview = preview_virtual_file(game_dir, virtual_path, source_group)?;
     if !preview.resolved {
         return Err(AppError::NotFound(
-            preview.reason.unwrap_or_else(|| "Virtual file not found".to_string()),
+            preview
+                .reason
+                .unwrap_or_else(|| "Virtual file not found".to_string()),
         ));
     }
 
     let mut cache = BTreeMap::new();
-    let (simple_index, full_index) = load_group_indexes(game_dir, &preview.source_group, &mut cache)?;
+    let (simple_index, full_index) =
+        load_group_indexes(game_dir, &preview.source_group, &mut cache)?;
     let info = resolve_game_file(virtual_path, simple_index, full_index)
         .ok_or_else(|| AppError::NotFound(format!("Virtual file not found: {virtual_path}")))?;
 
@@ -799,7 +827,10 @@ pub fn repack_xml_entry(
         let src_paz = game_dir
             .join(&preview.source_group)
             .join(format!("{}.paz", info.record.paz_index));
-        let mut file = std::fs::OpenOptions::new().read(true).write(true).open(&src_paz)?;
+        let mut file = std::fs::OpenOptions::new()
+            .read(true)
+            .write(true)
+            .open(&src_paz)?;
         use std::io::{Seek, SeekFrom, Write};
         file.seek(SeekFrom::Start(info.record.paz_offset as u64))?;
         file.write_all(&payload)?;
@@ -828,14 +859,19 @@ fn load_group_indexes<'a>(
             BTreeMap<String, ResolvedGameFile>,
         ),
     >,
-) -> AppResult<&'a (BTreeMap<String, ResolvedGameFile>, BTreeMap<String, ResolvedGameFile>)> {
+) -> AppResult<&'a (
+    BTreeMap<String, ResolvedGameFile>,
+    BTreeMap<String, ResolvedGameFile>,
+)> {
     if !cache.contains_key(source_group) {
         let pamt_info = read_pamt_raw(&game_dir.join(source_group).join("0.pamt"))?;
         cache.insert(source_group.to_string(), build_file_index(&pamt_info));
     }
 
     cache.get(source_group).ok_or_else(|| {
-        AppError::NotFound(format!("Could not load source group indexes for {source_group}"))
+        AppError::NotFound(format!(
+            "Could not load source group indexes for {source_group}"
+        ))
     })
 }
 
@@ -913,8 +949,12 @@ fn hashlittle_lookup3(data: &[u8], initval: u32) -> u32 {
 
     while remaining > 12 {
         a = a.wrapping_add(u32::from_le_bytes(data[off..off + 4].try_into().unwrap()));
-        b = b.wrapping_add(u32::from_le_bytes(data[off + 4..off + 8].try_into().unwrap()));
-        c = c.wrapping_add(u32::from_le_bytes(data[off + 8..off + 12].try_into().unwrap()));
+        b = b.wrapping_add(u32::from_le_bytes(
+            data[off + 4..off + 8].try_into().unwrap(),
+        ));
+        c = c.wrapping_add(u32::from_le_bytes(
+            data[off + 8..off + 12].try_into().unwrap(),
+        ));
         a = a.wrapping_sub(c) ^ rot32(c, 4);
         c = c.wrapping_add(b);
         b = b.wrapping_sub(a) ^ rot32(a, 6);
@@ -975,7 +1015,7 @@ fn hashlittle_lookup3(data: &[u8], initval: u32) -> u32 {
 }
 
 fn rot32(value: u32, bits: u32) -> u32 {
-	value.rotate_left(bits)
+    value.rotate_left(bits)
 }
 
 fn count_overlaps(changes: &[(String, ModChange)]) -> usize {
@@ -1602,7 +1642,8 @@ mod tests {
 
     use super::*;
 
-    const GAME_PACKAGES_DIR: &str = "/Users/gigi/Games/Crimson Desert.app/Contents/Resources/packages";
+    const GAME_PACKAGES_DIR: &str =
+        "/Users/gigi/Games/Crimson Desert.app/Contents/Resources/packages";
     const DOWNLOADED_MODS_DIR: &str = "/Users/gigi/Downloads/CD Mods";
     static TEST_MUTEX: LazyLock<Mutex<()>> = LazyLock::new(|| Mutex::new(()));
 
@@ -1626,14 +1667,19 @@ mod tests {
         .unwrap();
 
         let records = db::list_mods(&connection).unwrap();
-        let result = apply_mods(&sandbox.packages_dir, &records, &[], None, &BTreeMap::new()).unwrap();
+        let result =
+            apply_mods(&sandbox.packages_dir, &records, &[], None, &BTreeMap::new()).unwrap();
 
         assert!(!result.created_groups.is_empty());
         let group_dir = sandbox.packages_dir.join(&result.created_groups[0]);
         assert!(group_dir.join("0.paz").is_file());
         assert!(group_dir.join("0.pamt").is_file());
         assert!(sandbox.packages_dir.join("meta").join("0.papgt").is_file());
-        assert!(sandbox.packages_dir.join("meta").join("0.papgt.bak").is_file());
+        assert!(sandbox
+            .packages_dir
+            .join("meta")
+            .join("0.papgt.bak")
+            .is_file());
     }
 
     #[test]
@@ -1654,7 +1700,8 @@ mod tests {
         .unwrap();
 
         let records = db::list_mods(&connection).unwrap();
-        let result = apply_mods(&sandbox.packages_dir, &records, &[], None, &BTreeMap::new()).unwrap();
+        let result =
+            apply_mods(&sandbox.packages_dir, &records, &[], None, &BTreeMap::new()).unwrap();
 
         assert!(!result.created_groups.is_empty());
         let group_dir = sandbox.packages_dir.join(&result.created_groups[0]);

@@ -9,7 +9,9 @@ use zip::read::ZipArchive;
 
 use crate::db;
 use crate::error::{AppError, AppResult};
-use crate::models::{ModChange, ModKind, ModManifest, ModPatch, ModPatchSummary, ModRecord, ScanResult};
+use crate::models::{
+    ModChange, ModKind, ModManifest, ModPatch, ModPatchSummary, ModRecord, ScanResult,
+};
 use crate::patcher::{build_file_index, read_pamt_raw, resolve_game_file};
 use crate::util::{now_iso_string, sanitize_file_name, unique_id};
 
@@ -275,10 +277,9 @@ pub fn import_mod(
 pub fn load_manifest(path: &Path) -> AppResult<ModManifest> {
     let raw = fs::read_to_string(path)?;
     let value: Value = serde_json::from_str(raw.trim_start_matches('\u{feff}'))?;
-    let patches_value = value
-        .get("patches")
-        .cloned()
-        .ok_or_else(|| AppError::InvalidMod(format!("{} is not a patch manifest", path.display())))?;
+    let patches_value = value.get("patches").cloned().ok_or_else(|| {
+        AppError::InvalidMod(format!("{} is not a patch manifest", path.display()))
+    })?;
     let patches: Vec<ModPatch> = serde_json::from_value(patches_value)?;
 
     if patches.is_empty() {
@@ -319,20 +320,17 @@ pub fn load_enabled_manifests(
     disabled_patches: &BTreeMap<String, BTreeSet<usize>>,
 ) -> AppResult<Vec<(ModRecord, ModManifest)>> {
     let mut mods = Vec::new();
-    for record in records
-        .iter()
-        .filter(|record| {
-            record.enabled
-                && match record.mod_kind {
-                    ModKind::JsonData => true,
-                    ModKind::Language => {
-                        record.language.as_deref() == selected_language
-                            && Path::new(&record.library_path).is_file()
-                    }
-                    ModKind::PrecompiledOverlay | ModKind::BrowserRaw => false,
+    for record in records.iter().filter(|record| {
+        record.enabled
+            && match record.mod_kind {
+                ModKind::JsonData => true,
+                ModKind::Language => {
+                    record.language.as_deref() == selected_language
+                        && Path::new(&record.library_path).is_file()
                 }
-        })
-    {
+                ModKind::PrecompiledOverlay | ModKind::BrowserRaw => false,
+            }
+    }) {
         let manifest = load_manifest(Path::new(&record.library_path))?;
         let manifest = filter_disabled_patches(manifest, disabled_patches.get(&record.id));
         if manifest.patches.is_empty() {
@@ -535,7 +533,10 @@ fn inspect_browser_raw_dir(root: &Path) -> AppResult<ModRecord> {
     }
 
     let files_dir = browser_files_dir(root).ok_or_else(|| {
-        AppError::InvalidMod(format!("{} does not declare a valid files dir", root.display()))
+        AppError::InvalidMod(format!(
+            "{} does not declare a valid files dir",
+            root.display()
+        ))
     })?;
     let name = read_precompiled_name(root).unwrap_or_else(|| {
         root.file_name()
@@ -737,8 +738,9 @@ fn extract_zip_to_cache(source: &Path, app_data_dir: &Path) -> AppResult<PathBuf
     fs::create_dir_all(&cache_dir)?;
 
     let archive_file = fs::File::open(source)?;
-    let mut archive = ZipArchive::new(archive_file)
-        .map_err(|err| AppError::InvalidMod(format!("Invalid zip archive {}: {err}", source.display())))?;
+    let mut archive = ZipArchive::new(archive_file).map_err(|err| {
+        AppError::InvalidMod(format!("Invalid zip archive {}: {err}", source.display()))
+    })?;
 
     for index in 0..archive.len() {
         let mut entry = archive
@@ -774,7 +776,10 @@ fn extract_archive_with_7z(source: &Path, app_data_dir: &Path) -> AppResult<Path
     fs::create_dir_all(&cache_dir)?;
 
     let tool = find_7z_tool().ok_or_else(|| {
-        AppError::Other("`7z` is not available on this system, so .7z/.rar archives cannot be imported".to_string())
+        AppError::Other(
+            "`7z` is not available on this system, so .7z/.rar archives cannot be imported"
+                .to_string(),
+        )
     })?;
 
     let status = Command::new(tool)
@@ -820,11 +825,12 @@ pub fn merged_changes(
                     .unwrap_or_else(|| "0008".to_string()),
                 game_file: patch.game_file.clone(),
             };
-            let entry = merged
-                .entry(target)
-                .or_insert_with(Vec::new);
+            let entry = merged.entry(target).or_insert_with(Vec::new);
             for change in &patch.changes {
-                entry.push((format!("{}#{}", record.name, record.load_order), change.clone()));
+                entry.push((
+                    format!("{}#{}", record.name, record.load_order),
+                    change.clone(),
+                ));
             }
         }
     }
@@ -843,7 +849,9 @@ fn filter_disabled_patches(
         .patches
         .into_iter()
         .enumerate()
-        .filter_map(|(patch_index, patch)| (!disabled_patches.contains(&patch_index)).then_some(patch))
+        .filter_map(|(patch_index, patch)| {
+            (!disabled_patches.contains(&patch_index)).then_some(patch)
+        })
         .collect();
     manifest
 }
@@ -878,8 +886,14 @@ mod tests {
         let browser_raw_mod = Path::new(DOWNLOADED_MODS_DIR).join("Better_Inventory_UI_Compatible");
 
         assert_eq!(detect_import_kind(&json_mod).unwrap(), ModKind::JsonData);
-        assert_eq!(detect_import_kind(&precompiled_mod).unwrap(), ModKind::PrecompiledOverlay);
-        assert_eq!(detect_import_kind(&browser_raw_mod).unwrap(), ModKind::BrowserRaw);
+        assert_eq!(
+            detect_import_kind(&precompiled_mod).unwrap(),
+            ModKind::PrecompiledOverlay
+        );
+        assert_eq!(
+            detect_import_kind(&browser_raw_mod).unwrap(),
+            ModKind::BrowserRaw
+        );
     }
 
     #[test]
@@ -887,13 +901,16 @@ mod tests {
         let results = scan_mod_folder(Path::new(DOWNLOADED_MODS_DIR), None).unwrap();
 
         assert!(results.iter().any(|result| {
-            result.mod_kind == ModKind::JsonData && result.file_name == "stamina_v1.02.00_infinite.json"
+            result.mod_kind == ModKind::JsonData
+                && result.file_name == "stamina_v1.02.00_infinite.json"
         }));
         assert!(results.iter().any(|result| {
-            result.mod_kind == ModKind::PrecompiledOverlay && result.file_name == "item_price_display"
+            result.mod_kind == ModKind::PrecompiledOverlay
+                && result.file_name == "item_price_display"
         }));
         assert!(results.iter().any(|result| {
-            result.mod_kind == ModKind::BrowserRaw && result.file_name == "Better_Inventory_UI_Compatible"
+            result.mod_kind == ModKind::BrowserRaw
+                && result.file_name == "Better_Inventory_UI_Compatible"
         }));
     }
 
@@ -928,7 +945,8 @@ mod tests {
 
         let results = scan_import_source(&zip_path, None, &temp_root).unwrap();
         assert!(results.iter().any(|result| {
-            result.mod_kind == ModKind::BrowserRaw && result.name == "Better Inventory UI compatible with BTM"
+            result.mod_kind == ModKind::BrowserRaw
+                && result.name == "Better Inventory UI compatible with BTM"
         }));
 
         let _ = fs::remove_dir_all(&temp_root);
@@ -978,7 +996,11 @@ mod tests {
                 continue;
             }
 
-            let relative = path.strip_prefix(root).unwrap().to_string_lossy().replace('\\', "/");
+            let relative = path
+                .strip_prefix(root)
+                .unwrap()
+                .to_string_lossy()
+                .replace('\\', "/");
             zip.start_file(relative, SimpleFileOptions::default())
                 .map_err(|err| AppError::Other(format!("Could not add file to zip: {err}")))?;
             zip.write_all(&fs::read(&path)?)

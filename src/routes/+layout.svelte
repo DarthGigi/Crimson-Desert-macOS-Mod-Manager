@@ -32,7 +32,13 @@
 				</p>
 			</div>
 			<div class="ml-auto">
-				<Button variant="outline" size="icon-sm" onclick={toggleMode} aria-label="Toggle theme" title={mode.current === 'dark' ? 'Switch to light mode' : 'Switch to dark mode'}>
+				<Button
+					variant="outline"
+					size="icon-sm"
+					onclick={toggleMode}
+					aria-label="Toggle theme"
+					title={mode.current === 'dark' ? 'Switch to light mode' : 'Switch to dark mode'}
+				>
 					{#if mode.current === 'dark'}
 						<Sun class="size-4" />
 					{:else}

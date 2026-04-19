@@ -3,23 +3,28 @@ mod error;
 mod game;
 mod models;
 mod mods;
-mod pathc;
 mod patcher;
+mod pathc;
 mod util;
 
 use std::path::{Path, PathBuf};
 use std::sync::Mutex;
 
 use db::{
-    clear_managed_groups, clear_patch_toggles, connect, get_setting, insert_history, list_history, list_managed_groups, list_mods,
-    list_disabled_patch_indexes, move_mod_in_load_order, replace_managed_groups, set_patch_enabled,
-    set_setting, update_mod_classification, update_mod_enabled,
+    clear_managed_groups, clear_patch_toggles, connect, get_setting, insert_history,
+    list_disabled_patch_indexes, list_history, list_managed_groups, list_mods,
+    move_mod_in_load_order, replace_managed_groups, set_patch_enabled, set_setting,
+    update_mod_classification, update_mod_enabled,
 };
 use error::{AppError, ErrorPayload};
 use game::{
     detect_packages_dir, inspect_game_install, launch_game, resolve_to_packages_dir, LaunchResult,
 };
-use models::{ApplyPreview, ApplyResult, DashboardData, ExtractPreview, ExtractResult, GameInstallInfo, HistoryEntry, ModKind, ModPatchSummary, ModRecord, PathcRepackResult, PathcSummary, ScanResult, StatusSummary, VirtualFileMatch, XmlPreview, XmlRepackResult};
+use models::{
+    ApplyPreview, ApplyResult, DashboardData, ExtractPreview, ExtractResult, GameInstallInfo,
+    HistoryEntry, ModKind, ModPatchSummary, ModRecord, PathcRepackResult, PathcSummary, ScanResult,
+    StatusSummary, VirtualFileMatch, XmlPreview, XmlRepackResult,
+};
 use tauri::{AppHandle, Manager, State};
 
 const SETTINGS_GAME_PATH: &str = "game_packages_path";
@@ -68,11 +73,14 @@ fn current_game_install(
     Ok(None)
 }
 
-fn build_dashboard(connection: &rusqlite::Connection, app_data_dir: &Path) -> Result<DashboardData, AppError> {
+fn build_dashboard(
+    connection: &rusqlite::Connection,
+    app_data_dir: &Path,
+) -> Result<DashboardData, AppError> {
     let mods = list_mods(connection)?;
     let managed_groups = list_managed_groups(connection)?;
-    let selected_language = get_setting(connection, SETTINGS_GAME_LANGUAGE)?
-        .filter(|value| !value.is_empty());
+    let selected_language =
+        get_setting(connection, SETTINGS_GAME_LANGUAGE)?.filter(|value| !value.is_empty());
     let enabled: Vec<ModRecord> = mods
         .iter()
         .filter(|record| record.enabled)
@@ -154,7 +162,10 @@ struct OperationMarkerGuard<'a> {
 impl<'a> OperationMarkerGuard<'a> {
     fn new(state: &'a AppState, operation: &str) -> Result<Self, AppError> {
         set_operation_marker(state, operation)?;
-        Ok(Self { state, active: true })
+        Ok(Self {
+            state,
+            active: true,
+        })
     }
 
     fn clear(&mut self) -> Result<(), AppError> {
@@ -216,8 +227,12 @@ fn scan_mod_folder_command(
 ) -> Result<Vec<ScanResult>, ErrorPayload> {
     let connection = state.connection().map_err(ErrorPayload::from)?;
     let packages_dir = saved_game_path(&connection).map_err(ErrorPayload::from)?;
-    mods::scan_import_source(Path::new(&folder_path), packages_dir.as_deref(), &state.app_data_dir)
-        .map_err(ErrorPayload::from)
+    mods::scan_import_source(
+        Path::new(&folder_path),
+        packages_dir.as_deref(),
+        &state.app_data_dir,
+    )
+    .map_err(ErrorPayload::from)
 }
 
 #[tauri::command]
@@ -300,18 +315,24 @@ fn set_mod_classification_command(
         .ok_or_else(|| ErrorPayload {
             message: format!("No mod found for id {mod_id}"),
         })?;
-    let resolved_kind = if mod_kind == ModKind::PrecompiledOverlay && Path::new(&existing.library_path).is_dir() {
-        mods::detect_import_kind(Path::new(&existing.library_path)).unwrap_or(mod_kind)
-    } else {
-        mod_kind
-    };
+    let resolved_kind =
+        if mod_kind == ModKind::PrecompiledOverlay && Path::new(&existing.library_path).is_dir() {
+            mods::detect_import_kind(Path::new(&existing.library_path)).unwrap_or(mod_kind)
+        } else {
+            mod_kind
+        };
     let normalized_language = if mod_kind == ModKind::Language {
         language.filter(|value| !value.trim().is_empty())
     } else {
         None
     };
-    update_mod_classification(&connection, &mod_id, resolved_kind, normalized_language.as_deref())
-        .map_err(ErrorPayload::from)?;
+    update_mod_classification(
+        &connection,
+        &mod_id,
+        resolved_kind,
+        normalized_language.as_deref(),
+    )
+    .map_err(ErrorPayload::from)?;
     insert_history(
         &connection,
         "classify",
@@ -355,9 +376,14 @@ fn get_mod_patch_summaries_command(
         .ok_or_else(|| ErrorPayload {
             message: format!("No mod found for id {mod_id}"),
         })?;
-    let manifest = mods::load_manifest(Path::new(&record.library_path)).map_err(ErrorPayload::from)?;
+    let manifest =
+        mods::load_manifest(Path::new(&record.library_path)).map_err(ErrorPayload::from)?;
     let disabled = list_disabled_patch_indexes(&connection).map_err(ErrorPayload::from)?;
-    Ok(mods::patch_summaries(&mod_id, &manifest, disabled.get(&mod_id)))
+    Ok(mods::patch_summaries(
+        &mod_id,
+        &manifest,
+        disabled.get(&mod_id),
+    ))
 }
 
 #[tauri::command]
@@ -373,7 +399,10 @@ fn set_patch_enabled_command(
         &connection,
         "toggle_patch",
         "ok",
-        &format!("{} patch {patch_index} for mod {mod_id}", if enabled { "Enabled" } else { "Disabled" }),
+        &format!(
+            "{} patch {patch_index} for mod {mod_id}",
+            if enabled { "Enabled" } else { "Disabled" }
+        ),
         None,
     )
     .map_err(ErrorPayload::from)?;
@@ -405,7 +434,7 @@ fn apply_mods_command(state: State<'_, AppState>) -> Result<ApplyResult, ErrorPa
         selected_language.as_deref(),
         &disabled_patches,
     )
-        .map_err(ErrorPayload::from)?;
+    .map_err(ErrorPayload::from)?;
     let replacement_groups = patcher::managed_group_records(&result.created_groups, "json_overlay");
     replace_managed_groups(&mut connection, &replacement_groups).map_err(ErrorPayload::from)?;
     insert_history(&connection, "apply", "ok", &result.message, None)
@@ -427,8 +456,13 @@ fn get_apply_preview_command(state: State<'_, AppState>) -> Result<ApplyPreview,
     let selected_language = get_setting(&connection, SETTINGS_GAME_LANGUAGE)
         .map_err(ErrorPayload::from)?
         .filter(|value| !value.is_empty());
-    patcher::preview_apply(&packages_dir, &mods, selected_language.as_deref(), &disabled_patches)
-        .map_err(ErrorPayload::from)
+    patcher::preview_apply(
+        &packages_dir,
+        &mods,
+        selected_language.as_deref(),
+        &disabled_patches,
+    )
+    .map_err(ErrorPayload::from)
 }
 
 #[tauri::command]
@@ -508,7 +542,8 @@ fn get_pathc_summary_command(
         let packages_dir = saved_game_path(&connection)
             .map_err(ErrorPayload::from)?
             .ok_or_else(|| ErrorPayload {
-                message: "Set the Crimson Desert game path first or choose a .pathc file.".to_string(),
+                message: "Set the Crimson Desert game path first or choose a .pathc file."
+                    .to_string(),
             })?;
         packages_dir.join("meta").join("0.pathc")
     };
@@ -525,7 +560,8 @@ fn repack_pathc_command(
     let _guard = state.operation_lock.lock().map_err(|_| ErrorPayload {
         message: "Operation lock poisoned".to_string(),
     })?;
-    let mut marker = OperationMarkerGuard::new(&state, "pathc_repack").map_err(ErrorPayload::from)?;
+    let mut marker =
+        OperationMarkerGuard::new(&state, "pathc_repack").map_err(ErrorPayload::from)?;
     let connection = state.connection().map_err(ErrorPayload::from)?;
     let resolved_path = if let Some(path) = path.filter(|value| !value.trim().is_empty()) {
         PathBuf::from(path)
@@ -533,12 +569,14 @@ fn repack_pathc_command(
         let packages_dir = saved_game_path(&connection)
             .map_err(ErrorPayload::from)?
             .ok_or_else(|| ErrorPayload {
-                message: "Set the Crimson Desert game path first or choose a .pathc file.".to_string(),
+                message: "Set the Crimson Desert game path first or choose a .pathc file."
+                    .to_string(),
             })?;
         packages_dir.join("meta").join("0.pathc")
     };
 
-    let result = pathc::repack_pathc(&resolved_path, Path::new(&folder_path)).map_err(ErrorPayload::from)?;
+    let result =
+        pathc::repack_pathc(&resolved_path, Path::new(&folder_path)).map_err(ErrorPayload::from)?;
     insert_history(
         &connection,
         "pathc_repack",
@@ -556,7 +594,8 @@ fn fix_everything_command(state: State<'_, AppState>) -> Result<DashboardData, E
     let _guard = state.operation_lock.lock().map_err(|_| ErrorPayload {
         message: "Operation lock poisoned".to_string(),
     })?;
-    let mut marker = OperationMarkerGuard::new(&state, "fix_everything").map_err(ErrorPayload::from)?;
+    let mut marker =
+        OperationMarkerGuard::new(&state, "fix_everything").map_err(ErrorPayload::from)?;
     let connection = state.connection().map_err(ErrorPayload::from)?;
 
     if let Some(packages_dir) = saved_game_path(&connection).map_err(ErrorPayload::from)? {
@@ -569,8 +608,12 @@ fn fix_everything_command(state: State<'_, AppState>) -> Result<DashboardData, E
     db::disable_all_mods(&connection).map_err(ErrorPayload::from)?;
     let import_cache = state.import_cache_dir();
     if import_cache.is_dir() {
-        std::fs::remove_dir_all(&import_cache).map_err(AppError::from).map_err(ErrorPayload::from)?;
-        std::fs::create_dir_all(&import_cache).map_err(AppError::from).map_err(ErrorPayload::from)?;
+        std::fs::remove_dir_all(&import_cache)
+            .map_err(AppError::from)
+            .map_err(ErrorPayload::from)?;
+        std::fs::create_dir_all(&import_cache)
+            .map_err(AppError::from)
+            .map_err(ErrorPayload::from)?;
     }
 
     insert_history(
@@ -611,20 +654,29 @@ fn extract_virtual_file_command(
     let _guard = state.operation_lock.lock().map_err(|_| ErrorPayload {
         message: "Operation lock poisoned".to_string(),
     })?;
-    let mut marker = OperationMarkerGuard::new(&state, "extract_virtual_file").map_err(ErrorPayload::from)?;
+    let mut marker =
+        OperationMarkerGuard::new(&state, "extract_virtual_file").map_err(ErrorPayload::from)?;
     let connection = state.connection().map_err(ErrorPayload::from)?;
     let packages_dir = saved_game_path(&connection)
         .map_err(ErrorPayload::from)?
         .ok_or_else(|| ErrorPayload {
             message: "Set the Crimson Desert game path first.".to_string(),
         })?;
-    let result = patcher::extract_virtual_file(&packages_dir, &virtual_path, source_group.as_deref(), Path::new(&output_dir))
-        .map_err(ErrorPayload::from)?;
+    let result = patcher::extract_virtual_file(
+        &packages_dir,
+        &virtual_path,
+        source_group.as_deref(),
+        Path::new(&output_dir),
+    )
+    .map_err(ErrorPayload::from)?;
     insert_history(
         &connection,
         "extract_virtual_file",
         "ok",
-        &format!("Extracted {} to {}", result.virtual_path, result.output_path),
+        &format!(
+            "Extracted {} to {}",
+            result.virtual_path, result.output_path
+        ),
         None,
     )
     .map_err(ErrorPayload::from)?;
@@ -645,8 +697,13 @@ fn search_virtual_files_command(
         .ok_or_else(|| ErrorPayload {
             message: "Set the Crimson Desert game path first.".to_string(),
         })?;
-    patcher::search_virtual_files(&packages_dir, &query, source_group.as_deref(), limit.unwrap_or(100))
-        .map_err(ErrorPayload::from)
+    patcher::search_virtual_files(
+        &packages_dir,
+        &query,
+        source_group.as_deref(),
+        limit.unwrap_or(100),
+    )
+    .map_err(ErrorPayload::from)
 }
 
 #[tauri::command]
@@ -659,20 +716,29 @@ fn extract_xml_entry_command(
     let _guard = state.operation_lock.lock().map_err(|_| ErrorPayload {
         message: "Operation lock poisoned".to_string(),
     })?;
-    let mut marker = OperationMarkerGuard::new(&state, "extract_xml_entry").map_err(ErrorPayload::from)?;
+    let mut marker =
+        OperationMarkerGuard::new(&state, "extract_xml_entry").map_err(ErrorPayload::from)?;
     let connection = state.connection().map_err(ErrorPayload::from)?;
     let packages_dir = saved_game_path(&connection)
         .map_err(ErrorPayload::from)?
         .ok_or_else(|| ErrorPayload {
             message: "Set the Crimson Desert game path first.".to_string(),
         })?;
-    let result = patcher::extract_xml_entry(&packages_dir, &virtual_path, source_group.as_deref(), Path::new(&output_dir))
-        .map_err(ErrorPayload::from)?;
+    let result = patcher::extract_xml_entry(
+        &packages_dir,
+        &virtual_path,
+        source_group.as_deref(),
+        Path::new(&output_dir),
+    )
+    .map_err(ErrorPayload::from)?;
     insert_history(
         &connection,
         "extract_xml_entry",
         "ok",
-        &format!("Extracted XML {} to {}", result.virtual_path, result.extracted_path),
+        &format!(
+            "Extracted XML {} to {}",
+            result.virtual_path, result.extracted_path
+        ),
         None,
     )
     .map_err(ErrorPayload::from)?;
@@ -691,7 +757,8 @@ fn repack_xml_entry_command(
     let _guard = state.operation_lock.lock().map_err(|_| ErrorPayload {
         message: "Operation lock poisoned".to_string(),
     })?;
-    let mut marker = OperationMarkerGuard::new(&state, "repack_xml_entry").map_err(ErrorPayload::from)?;
+    let mut marker =
+        OperationMarkerGuard::new(&state, "repack_xml_entry").map_err(ErrorPayload::from)?;
     let connection = state.connection().map_err(ErrorPayload::from)?;
     let packages_dir = saved_game_path(&connection)
         .map_err(ErrorPayload::from)?
@@ -710,7 +777,10 @@ fn repack_xml_entry_command(
         &connection,
         "repack_xml_entry",
         "ok",
-        &format!("Repacked XML {} ({} -> {} bytes)", result.virtual_path, result.target_comp_size, result.new_comp_size),
+        &format!(
+            "Repacked XML {} ({} -> {} bytes)",
+            result.virtual_path, result.target_comp_size, result.new_comp_size
+        ),
         None,
     )
     .map_err(ErrorPayload::from)?;

@@ -40,7 +40,7 @@ import {
 	setSelectedLanguage,
 	setModEnabled,
 	extractVirtualFile,
-	repackXmlEntry,
+	repackXmlEntry
 } from '$lib/desktop-api';
 
 export type ManagerMessage = {
@@ -589,13 +589,27 @@ class ManagerState {
 		}
 	}
 
-	async repackXmlEntry(virtualPath: string, sourceGroup: string | null, modifiedPath: string, outputPath: string | null) {
+	async repackXmlEntry(
+		virtualPath: string,
+		sourceGroup: string | null,
+		modifiedPath: string,
+		outputPath: string | null
+	) {
 		this.busy.xml = true;
 		this.clearMessage();
 		try {
-			this.xmlRepackResult = await repackXmlEntry(virtualPath, sourceGroup, modifiedPath, outputPath);
+			this.xmlRepackResult = await repackXmlEntry(
+				virtualPath,
+				sourceGroup,
+				modifiedPath,
+				outputPath
+			);
 			await this.refreshHistory();
-			toast.success(this.xmlRepackResult.patchedInPlace ? 'Patched XML entry in place.' : 'Prepared XML repack payload.');
+			toast.success(
+				this.xmlRepackResult.patchedInPlace
+					? 'Patched XML entry in place.'
+					: 'Prepared XML repack payload.'
+			);
 		} catch (error) {
 			this.setError(error, 'Could not repack XML entry');
 		} finally {

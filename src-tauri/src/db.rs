@@ -95,7 +95,12 @@ pub fn connect(app_data_dir: &Path) -> AppResult<Connection> {
     Ok(connection)
 }
 
-fn ensure_column(connection: &Connection, table: &str, column: &str, definition: &str) -> AppResult<()> {
+fn ensure_column(
+    connection: &Connection,
+    table: &str,
+    column: &str,
+    definition: &str,
+) -> AppResult<()> {
     let mut statement = connection.prepare(&format!("PRAGMA table_info({table})"))?;
     let columns = statement.query_map([], |row| row.get::<_, String>(1))?;
 
@@ -280,7 +285,9 @@ pub fn clear_managed_groups(connection: &Connection) -> AppResult<()> {
     Ok(())
 }
 
-pub fn list_disabled_patch_indexes(connection: &Connection) -> AppResult<BTreeMap<String, BTreeSet<usize>>> {
+pub fn list_disabled_patch_indexes(
+    connection: &Connection,
+) -> AppResult<BTreeMap<String, BTreeSet<usize>>> {
     let mut statement = connection.prepare(
         "SELECT mod_id, patch_index
          FROM patch_toggles
@@ -364,7 +371,11 @@ pub fn update_mod_classification(
     Ok(())
 }
 
-pub fn move_mod_in_load_order(connection: &mut Connection, mod_id: &str, direction: &str) -> AppResult<()> {
+pub fn move_mod_in_load_order(
+    connection: &mut Connection,
+    mod_id: &str,
+    direction: &str,
+) -> AppResult<()> {
     let mods = list_mods(connection)?;
     let mut ordered: Vec<ModRecord> = mods
         .into_iter()
@@ -412,7 +423,7 @@ pub fn disable_all_mods(connection: &Connection) -> AppResult<()> {
 
 pub fn list_mods(connection: &Connection) -> AppResult<Vec<ModRecord>> {
     let mut statement = connection.prepare(
-		"SELECT id, mod_kind, name, description, file_name, source_path, library_path,
+        "SELECT id, mod_kind, name, description, file_name, source_path, library_path,
 		        enabled, load_order, language, install_group,
 		        patch_count, change_count, target_files_json, imported_at, updated_at
 		 FROM mods

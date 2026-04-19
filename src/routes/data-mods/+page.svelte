@@ -86,8 +86,8 @@
 				<Empty.Root class="min-h-40 border-dashed bg-muted/20 p-8"
 					><Empty.Header
 						><Empty.Title>No scanned candidates</Empty.Title><Empty.Description
-							>Pick a folder or ZIP/7Z/RAR archive to preview importable JSON, precompiled, and browser/raw
-							mods.</Empty.Description
+							>Pick a folder or ZIP/7Z/RAR archive to preview importable JSON, precompiled, and
+							browser/raw mods.</Empty.Description
 						></Empty.Header
 					></Empty.Root
 				>
