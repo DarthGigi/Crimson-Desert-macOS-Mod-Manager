@@ -62,6 +62,9 @@ jobs:
           echo "TAURI_SIGNING_PRIVATE_KEY=${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}" >> "$GITHUB_ENV"
 
       - name: Build Tauri bundles
+        env:
+          CI: false
+          TAURI_BUNDLER_DMG_IGNORE_CI: false
         run: pnpm tauri build --bundles app,dmg --target ${{ matrix.target }}
 
       - name: Read app version
