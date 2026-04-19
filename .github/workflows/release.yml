@@ -63,7 +63,6 @@ jobs:
       - name: Set updater signing env
         run: |
           echo "TAURI_SIGNING_PRIVATE_KEY=${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}" >> "$GITHUB_ENV"
-          echo "TAURI_SIGNING_PRIVATE_KEY_PASSWORD=${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}" >> "$GITHUB_ENV"
 
       - name: Build Tauri bundles
         run: pnpm tauri build --bundles app,dmg --target ${{ matrix.target }}
