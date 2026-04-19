@@ -35,12 +35,18 @@ pub struct ModChange {
     pub patched: String,
     #[serde(default)]
     pub label: Option<String>,
+    #[serde(default)]
+    pub entry: Option<String>,
+    #[serde(default)]
+    pub rel_offset: Option<usize>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct ModPatch {
     pub game_file: String,
+    #[serde(default)]
+    pub source_group: Option<String>,
     pub changes: Vec<ModChange>,
 }
 
@@ -89,6 +95,7 @@ pub struct ModRecord {
 #[serde(rename_all = "camelCase")]
 pub struct ScanResult {
     pub path: String,
+    pub mod_kind: ModKind,
     pub file_name: String,
     pub name: String,
     pub description: Option<String>,
@@ -103,9 +110,11 @@ pub struct ScanResult {
 #[serde(rename_all = "camelCase")]
 pub struct ApplyFileResult {
     pub game_file: String,
+    pub source_group: String,
     pub source_paz_index: u16,
     pub applied_changes: usize,
     pub skipped_changes: usize,
+    pub overlap_count: usize,
     pub reason: Option<String>,
 }
 
@@ -117,8 +126,17 @@ pub struct ApplyResult {
     pub overlay_file_count: usize,
     pub paz_size: usize,
     pub pamt_size: usize,
+    pub created_groups: Vec<String>,
     pub files: Vec<ApplyFileResult>,
     pub message: String,
+}
+
+#[derive(Debug, Clone)]
+pub struct ManagedGroupRecord {
+    pub group_name: String,
+    pub purpose: String,
+    pub source_mod_id: Option<String>,
+    pub created_at: String,
 }
 
 #[derive(Debug, Clone, Serialize)]

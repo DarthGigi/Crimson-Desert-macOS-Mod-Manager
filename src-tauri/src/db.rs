@@ -4,7 +4,7 @@ use std::path::{Path, PathBuf};
 use rusqlite::{params, Connection, OptionalExtension};
 
 use crate::error::{AppError, AppResult};
-use crate::models::{ModKind, ModRecord};
+use crate::models::{ManagedGroupRecord, ModKind, ModRecord};
 use crate::util::{bool_to_int, int_to_bool, now_iso_string};
 
 pub const DATABASE_NAME: &str = "app.db";
@@ -188,6 +188,59 @@ pub fn next_load_order(connection: &Connection) -> AppResult<i64> {
         .optional()?
         .flatten();
     Ok(max.unwrap_or(-1) + 1)
+}
+
+pub fn list_managed_groups(connection: &Connection) -> AppResult<Vec<ManagedGroupRecord>> {
+    let mut statement = connection.prepare(
+        "SELECT group_name, purpose, source_mod_id, created_at
+         FROM managed_groups
+         ORDER BY group_name ASC",
+    )?;
+
+    let rows = statement.query_map([], |row| {
+        Ok(ManagedGroupRecord {
+            group_name: row.get(0)?,
+            purpose: row.get(1)?,
+            source_mod_id: row.get(2)?,
+            created_at: row.get(3)?,
+        })
+    })?;
+
+    let mut groups = Vec::new();
+    for row in rows {
+        groups.push(row?);
+    }
+
+    Ok(groups)
+}
+
+pub fn replace_managed_groups(
+    connection: &mut Connection,
+    groups: &[ManagedGroupRecord],
+) -> AppResult<()> {
+    let transaction = connection.transaction()?;
+    transaction.execute("DELETE FROM managed_groups", [])?;
+
+    for group in groups {
+        transaction.execute(
+            "INSERT INTO managed_groups(group_name, purpose, source_mod_id, created_at)
+             VALUES (?1, ?2, ?3, ?4)",
+            params![
+                group.group_name,
+                group.purpose,
+                group.source_mod_id,
+                group.created_at,
+            ],
+        )?;
+    }
+
+    transaction.commit()?;
+    Ok(())
+}
+
+pub fn clear_managed_groups(connection: &Connection) -> AppResult<()> {
+    connection.execute("DELETE FROM managed_groups", [])?;
+    Ok(())
 }
 
 pub fn update_mod_enabled(connection: &Connection, mod_id: &str, enabled: bool) -> AppResult<()> {

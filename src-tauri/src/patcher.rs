@@ -5,9 +5,9 @@ use std::path::Path;
 use lz4_flex::block;
 
 use crate::error::{AppError, AppResult};
-use crate::game::{MOD_GROUP, SOURCE_GROUP};
-use crate::models::{ApplyFileResult, ApplyResult, ModChange, ModRecord};
+use crate::models::{ApplyFileResult, ApplyResult, ManagedGroupRecord, ModChange, ModRecord};
 use crate::mods::{load_enabled_manifests, merged_changes};
+use crate::util::now_iso_string;
 
 const PA_MAGIC: u32 = 0x2145_E233;
 const MASK: u32 = 0xFFFF_FFFF;
@@ -289,43 +289,60 @@ pub fn resolve_game_file<'a>(
     full.get(game_file).or_else(|| simplified.get(game_file))
 }
 
-pub fn apply_mods(game_dir: &Path, records: &[ModRecord]) -> AppResult<ApplyResult> {
+pub fn apply_mods(
+    game_dir: &Path,
+    records: &[ModRecord],
+    managed_groups: &[ManagedGroupRecord],
+) -> AppResult<ApplyResult> {
     let enabled_manifests = load_enabled_manifests(records)?;
-    if enabled_manifests.is_empty() {
+    let enabled_precompiled: Vec<ModRecord> = records
+        .iter()
+        .filter(|record| record.enabled && record.mod_kind == crate::models::ModKind::PrecompiledOverlay)
+        .cloned()
+        .collect();
+
+    if enabled_manifests.is_empty() && enabled_precompiled.is_empty() {
         return Err(AppError::Patch(
             "No enabled mods are available. Import a mod and enable it before applying."
                 .to_string(),
         ));
     }
 
-    let pamt_info = read_pamt_raw(&game_dir.join(SOURCE_GROUP).join("0.pamt"))?;
-    let (simple_index, full_index) = build_file_index(&pamt_info);
     let merged = merged_changes(&enabled_manifests);
 
-    let overlay_dir = game_dir.join(MOD_GROUP);
-    if overlay_dir.is_dir() {
-        fs::remove_dir_all(&overlay_dir)?;
-    }
+    let papgt_path = game_dir.join("meta").join("0.papgt");
+    let papgt_backup = game_dir.join("meta").join("0.papgt.bak");
+    restore_base_papgt(&papgt_path, &papgt_backup)?;
+    cleanup_managed_groups(game_dir, managed_groups)?;
+
+    let mut next_group = next_dynamic_group_number(game_dir)?;
+    let mut created_groups = Vec::new();
 
     let mut paz_buffer = Vec::new();
     let mut overlay_files = Vec::new();
     let mut file_results = Vec::new();
+    let mut json_pamt_size = 0usize;
 
-    for (game_file, changes) in merged {
-        let Some(info) = resolve_game_file(&game_file, &simple_index, &full_index) else {
+    let mut file_index_cache = BTreeMap::new();
+
+    for (target, changes) in merged {
+        let (simple_index, full_index) = load_group_indexes(game_dir, &target.source_group, &mut file_index_cache)?;
+        let Some(info) = resolve_game_file(&target.game_file, simple_index, full_index) else {
             file_results.push(ApplyFileResult {
-                game_file,
+                game_file: target.game_file,
+                source_group: target.source_group,
                 source_paz_index: 0,
                 applied_changes: 0,
                 skipped_changes: 0,
-                reason: Some("Target file not found in 0008/0.pamt".to_string()),
+                overlap_count: 0,
+                reason: Some("Target file not found in the declared source group".to_string()),
             });
             continue;
         };
 
         let record = &info.record;
         let src_paz = game_dir
-            .join(SOURCE_GROUP)
+            .join(&target.source_group)
             .join(format!("{}.paz", record.paz_index));
         let compressed = read_paz_slice(
             &src_paz,
@@ -336,6 +353,7 @@ pub fn apply_mods(game_dir: &Path, records: &[ModRecord]) -> AppResult<ApplyResu
 
         let mut applied = 0usize;
         let mut skipped = 0usize;
+        let overlap_count = count_overlaps(&changes);
         for (mod_name, change) in changes {
             match apply_change(&mut buffer, &mod_name, &change) {
                 Ok(true) => applied += 1,
@@ -361,68 +379,231 @@ pub fn apply_mods(game_dir: &Path, records: &[ModRecord]) -> AppResult<ApplyResu
 
         file_results.push(ApplyFileResult {
             game_file: info.full_path.clone(),
+            source_group: target.source_group,
             source_paz_index: record.paz_index,
             applied_changes: applied,
             skipped_changes: skipped,
+            overlap_count,
             reason: None,
         });
     }
 
-    if overlay_files.is_empty() {
+    if overlay_files.is_empty() && enabled_precompiled.is_empty() {
         return Err(AppError::Patch(
 			"No target files could be patched. Check mod compatibility with the current game build."
 				.to_string(),
 		));
     }
 
-    fs::create_dir_all(&overlay_dir)?;
-    let paz_path = overlay_dir.join("0.paz");
-    fs::write(&paz_path, &paz_buffer)?;
-    let paz_crc = pa_checksum(&paz_buffer);
+    if !overlay_files.is_empty() {
+        let group_name = format!("{:04}", next_group);
+        next_group += 1;
+        let overlay_dir = game_dir.join(&group_name);
+        fs::create_dir_all(&overlay_dir)?;
+        let paz_path = overlay_dir.join("0.paz");
+        fs::write(&paz_path, &paz_buffer)?;
+        let paz_crc = pa_checksum(&paz_buffer);
 
-    let mut pamt_data = build_multi_pamt(&overlay_files, paz_buffer.len());
-    update_pamt_paz_crc(&mut pamt_data, paz_crc);
-    let pamt_crc = read_u32_le(&pamt_data, 0);
-    let pamt_path = overlay_dir.join("0.pamt");
-    fs::write(&pamt_path, &pamt_data)?;
+        let mut pamt_data = build_multi_pamt(&overlay_files, paz_buffer.len());
+        json_pamt_size = pamt_data.len();
+        update_pamt_paz_crc(&mut pamt_data, paz_crc);
+        let pamt_crc = read_u32_le(&pamt_data, 0);
+        let pamt_path = overlay_dir.join("0.pamt");
+        fs::write(&pamt_path, &pamt_data)?;
 
-    let papgt_path = game_dir.join("meta").join("0.papgt");
-    let papgt_backup = game_dir.join("meta").join("0.papgt.bak");
-    if !papgt_backup.exists() {
-        fs::copy(&papgt_path, &papgt_backup)?;
-    } else {
-        fs::copy(&papgt_backup, &papgt_path)?;
+        let new_papgt = build_papgt_with_mod(&papgt_path, &group_name, pamt_crc)?;
+        fs::write(&papgt_path, &new_papgt)?;
+        created_groups.push(group_name);
     }
 
-    let new_papgt = build_papgt_with_mod(&papgt_path, MOD_GROUP, pamt_crc)?;
-    fs::write(&papgt_path, &new_papgt)?;
+    for record in &enabled_precompiled {
+        let installed = install_precompiled_mod(game_dir, &papgt_path, record, &mut next_group)?;
+        created_groups.extend(installed);
+    }
 
     Ok(ApplyResult {
-        mod_count: enabled_manifests.len(),
+        mod_count: enabled_manifests.len() + enabled_precompiled.len(),
         target_file_count: file_results.len(),
-        overlay_file_count: overlay_files.len(),
+        overlay_file_count: overlay_files.len() + created_groups.len().saturating_sub(overlay_files.is_empty() as usize),
         paz_size: paz_buffer.len(),
-        pamt_size: pamt_data.len(),
+        pamt_size: json_pamt_size,
+        created_groups: created_groups.clone(),
         files: file_results,
         message: format!(
-            "Merged {} enabled mod(s) into {} patched file(s).",
-            enabled_manifests.len(),
-            overlay_files.len()
+            "Installed {} enabled mod(s) into {} manager-owned group(s).",
+            enabled_manifests.len() + enabled_precompiled.len(),
+            created_groups.len(),
         ),
     })
 }
 
-pub fn restore_vanilla(game_dir: &Path) -> AppResult<()> {
+fn load_group_indexes<'a>(
+    game_dir: &Path,
+    source_group: &str,
+    cache: &'a mut BTreeMap<
+        String,
+        (
+            BTreeMap<String, ResolvedGameFile>,
+            BTreeMap<String, ResolvedGameFile>,
+        ),
+    >,
+) -> AppResult<&'a (BTreeMap<String, ResolvedGameFile>, BTreeMap<String, ResolvedGameFile>)> {
+    if !cache.contains_key(source_group) {
+        let pamt_info = read_pamt_raw(&game_dir.join(source_group).join("0.pamt"))?;
+        cache.insert(source_group.to_string(), build_file_index(&pamt_info));
+    }
+
+    cache.get(source_group).ok_or_else(|| {
+        AppError::NotFound(format!("Could not load source group indexes for {source_group}"))
+    })
+}
+
+fn count_overlaps(changes: &[(String, ModChange)]) -> usize {
+    let mut counts = BTreeMap::<usize, usize>::new();
+    for (_, change) in changes {
+        *counts.entry(change.offset).or_default() += 1;
+    }
+
+    counts.values().filter(|count| **count > 1).count()
+}
+
+pub fn restore_vanilla(game_dir: &Path, managed_groups: &[ManagedGroupRecord]) -> AppResult<()> {
     let papgt_path = game_dir.join("meta").join("0.papgt");
     let papgt_backup = game_dir.join("meta").join("0.papgt.bak");
-    let overlay_dir = game_dir.join(MOD_GROUP);
 
-    if papgt_backup.exists() {
+    restore_base_papgt(&papgt_path, &papgt_backup)?;
+    cleanup_managed_groups(game_dir, managed_groups)?;
+
+    Ok(())
+}
+
+pub fn managed_group_records(group_names: &[String], purpose: &str) -> Vec<ManagedGroupRecord> {
+    group_names
+        .iter()
+        .map(|group_name| ManagedGroupRecord {
+            group_name: group_name.clone(),
+            purpose: purpose.to_string(),
+            source_mod_id: None,
+            created_at: now_iso_string(),
+        })
+        .collect()
+}
+
+fn restore_base_papgt(papgt_path: &Path, papgt_backup: &Path) -> AppResult<()> {
+    if !papgt_backup.exists() {
+        fs::copy(papgt_path, papgt_backup)?;
+    } else {
         fs::copy(papgt_backup, papgt_path)?;
     }
 
-    if overlay_dir.is_dir() {
-        fs::remove_dir_all(overlay_dir)?;
+    Ok(())
+}
+
+fn cleanup_managed_groups(game_dir: &Path, managed_groups: &[ManagedGroupRecord]) -> AppResult<()> {
+    for group in managed_groups {
+        let group_dir = game_dir.join(&group.group_name);
+        if group_dir.is_dir() {
+            fs::remove_dir_all(group_dir)?;
+        }
+    }
+
+    Ok(())
+}
+
+fn next_dynamic_group_number(game_dir: &Path) -> AppResult<u16> {
+    let mut max_group = 35u16;
+
+    for entry in fs::read_dir(game_dir)? {
+        let entry = entry?;
+        let path = entry.path();
+        if !path.is_dir() {
+            continue;
+        }
+
+        let Some(name) = path.file_name().and_then(|value| value.to_str()) else {
+            continue;
+        };
+
+        if name.len() != 4 || !name.chars().all(|ch| ch.is_ascii_digit()) {
+            continue;
+        }
+
+        let value = name.parse::<u16>().map_err(|_| {
+            AppError::Other(format!("Failed to parse numeric group folder: {name}"))
+        })?;
+        max_group = max_group.max(value);
+    }
+
+    Ok(max_group + 1)
+}
+
+fn install_precompiled_mod(
+    game_dir: &Path,
+    papgt_path: &Path,
+    record: &ModRecord,
+    next_group: &mut u16,
+) -> AppResult<Vec<String>> {
+    let source_root = Path::new(&record.library_path);
+    let mut source_groups = Vec::new();
+
+    for entry in fs::read_dir(source_root)? {
+        let entry = entry?;
+        let path = entry.path();
+        if !path.is_dir() {
+            continue;
+        }
+
+        let Some(name) = path.file_name().and_then(|value| value.to_str()) else {
+            continue;
+        };
+
+        if name.len() == 4
+            && name.chars().all(|ch| ch.is_ascii_digit())
+            && path.join("0.pamt").is_file()
+            && path.join("0.paz").is_file()
+        {
+            source_groups.push(path);
+        }
+    }
+
+    source_groups.sort();
+    if source_groups.is_empty() {
+        return Err(AppError::InvalidMod(format!(
+            "{} does not contain any precompiled numeric groups",
+            record.library_path
+        )));
+    }
+
+    let mut created = Vec::new();
+    for source_group in source_groups {
+        let target_group = format!("{:04}", *next_group);
+        *next_group += 1;
+
+        let target_dir = game_dir.join(&target_group);
+        copy_dir_all(&source_group, &target_dir)?;
+
+        let pamt_bytes = fs::read(target_dir.join("0.pamt"))?;
+        let pamt_crc = read_u32_le(&pamt_bytes, 0);
+        let new_papgt = build_papgt_with_mod(papgt_path, &target_group, pamt_crc)?;
+        fs::write(papgt_path, &new_papgt)?;
+        created.push(target_group);
+    }
+
+    Ok(created)
+}
+
+fn copy_dir_all(source: &Path, destination: &Path) -> AppResult<()> {
+    fs::create_dir_all(destination)?;
+
+    for entry in fs::read_dir(source)? {
+        let entry = entry?;
+        let entry_path = entry.path();
+        let target_path = destination.join(entry.file_name());
+        if entry_path.is_dir() {
+            copy_dir_all(&entry_path, &target_path)?;
+        } else {
+            fs::copy(&entry_path, &target_path)?;
+        }
     }
 
     Ok(())

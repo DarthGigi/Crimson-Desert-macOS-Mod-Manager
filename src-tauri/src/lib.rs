@@ -9,13 +9,15 @@ mod util;
 use std::path::{Path, PathBuf};
 use std::sync::Mutex;
 
-use db::{connect, get_setting, insert_history, list_mods, set_setting, update_mod_enabled};
+use db::{
+    clear_managed_groups, connect, get_setting, insert_history, list_managed_groups, list_mods,
+    replace_managed_groups, set_setting, update_mod_enabled,
+};
 use error::{AppError, ErrorPayload};
 use game::{
     detect_packages_dir, inspect_game_install, launch_game, resolve_to_packages_dir, LaunchResult,
-    MOD_GROUP,
 };
-use models::{ApplyResult, DashboardData, GameInstallInfo, ModKind, ModRecord, ScanResult, StatusSummary};
+use models::{ApplyResult, DashboardData, GameInstallInfo, ModRecord, ScanResult, StatusSummary};
 use tauri::{AppHandle, Manager, State};
 
 const SETTINGS_GAME_PATH: &str = "game_packages_path";
@@ -57,6 +59,7 @@ fn current_game_install(
 
 fn build_dashboard(connection: &rusqlite::Connection) -> Result<DashboardData, AppError> {
     let mods = list_mods(connection)?;
+    let managed_groups = list_managed_groups(connection)?;
     let enabled: Vec<ModRecord> = mods
         .iter()
         .filter(|record| record.enabled)
@@ -68,9 +71,13 @@ fn build_dashboard(connection: &rusqlite::Connection) -> Result<DashboardData, A
         .cloned()
         .collect();
     let game_install = current_game_install(connection)?;
-    let overlay_active = game_install
-        .as_ref()
-        .is_some_and(|install| Path::new(&install.packages_path).join(MOD_GROUP).is_dir());
+    let overlay_active = game_install.as_ref().is_some_and(|install| {
+        managed_groups.iter().any(|group| {
+            Path::new(&install.packages_path)
+                .join(&group.group_name)
+                .is_dir()
+        })
+    });
     let backup_exists = game_install.as_ref().is_some_and(|install| {
         Path::new(&install.packages_path)
             .join("meta")
@@ -146,12 +153,13 @@ fn import_mod_variant_command(
     state: State<'_, AppState>,
 ) -> Result<DashboardData, ErrorPayload> {
     let connection = state.connection().map_err(ErrorPayload::from)?;
+    let mod_kind = mods::detect_import_kind(Path::new(&path)).map_err(ErrorPayload::from)?;
     let record = mods::import_mod(
         &state.app_data_dir,
         &connection,
         Path::new(&path),
         enable,
-        ModKind::JsonData,
+        mod_kind,
         None,
     )
     .map_err(ErrorPayload::from)?;
@@ -193,14 +201,17 @@ fn apply_mods_command(state: State<'_, AppState>) -> Result<ApplyResult, ErrorPa
     let _guard = state.operation_lock.lock().map_err(|_| ErrorPayload {
         message: "Operation lock poisoned".to_string(),
     })?;
-    let connection = state.connection().map_err(ErrorPayload::from)?;
+    let mut connection = state.connection().map_err(ErrorPayload::from)?;
     let packages_dir = saved_game_path(&connection)
         .map_err(ErrorPayload::from)?
         .ok_or_else(|| ErrorPayload {
             message: "Set the Crimson Desert game path first.".to_string(),
         })?;
     let mods = list_mods(&connection).map_err(ErrorPayload::from)?;
-    let result = patcher::apply_mods(&packages_dir, &mods).map_err(ErrorPayload::from)?;
+    let managed_groups = list_managed_groups(&connection).map_err(ErrorPayload::from)?;
+    let result = patcher::apply_mods(&packages_dir, &mods, &managed_groups).map_err(ErrorPayload::from)?;
+    let replacement_groups = patcher::managed_group_records(&result.created_groups, "json_overlay");
+    replace_managed_groups(&mut connection, &replacement_groups).map_err(ErrorPayload::from)?;
     insert_history(&connection, "apply", "ok", &result.message, None)
         .map_err(ErrorPayload::from)?;
     Ok(result)
@@ -217,7 +228,9 @@ fn restore_vanilla_command(state: State<'_, AppState>) -> Result<DashboardData, 
         .ok_or_else(|| ErrorPayload {
             message: "Set the Crimson Desert game path first.".to_string(),
         })?;
-    patcher::restore_vanilla(&packages_dir).map_err(ErrorPayload::from)?;
+    let managed_groups = list_managed_groups(&connection).map_err(ErrorPayload::from)?;
+    patcher::restore_vanilla(&packages_dir, &managed_groups).map_err(ErrorPayload::from)?;
+    clear_managed_groups(&connection).map_err(ErrorPayload::from)?;
     insert_history(
         &connection,
         "restore",
@@ -236,8 +249,10 @@ fn reset_active_mods_command(state: State<'_, AppState>) -> Result<DashboardData
     })?;
     let connection = state.connection().map_err(ErrorPayload::from)?;
     if let Some(packages_dir) = saved_game_path(&connection).map_err(ErrorPayload::from)? {
-        patcher::restore_vanilla(&packages_dir).map_err(ErrorPayload::from)?;
+        let managed_groups = list_managed_groups(&connection).map_err(ErrorPayload::from)?;
+        patcher::restore_vanilla(&packages_dir, &managed_groups).map_err(ErrorPayload::from)?;
     }
+    clear_managed_groups(&connection).map_err(ErrorPayload::from)?;
     db::disable_all_mods(&connection).map_err(ErrorPayload::from)?;
     insert_history(
         &connection,

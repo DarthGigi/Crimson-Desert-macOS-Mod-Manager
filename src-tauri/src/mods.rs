@@ -2,11 +2,19 @@ use std::collections::{BTreeMap, BTreeSet};
 use std::fs;
 use std::path::{Path, PathBuf};
 
+use serde_json::Value;
+
 use crate::db;
 use crate::error::{AppError, AppResult};
-use crate::models::{ModKind, ModManifest, ModRecord, ScanResult};
+use crate::models::{ModChange, ModKind, ModManifest, ModPatch, ModRecord, ScanResult};
 use crate::patcher::{build_file_index, read_pamt_raw, resolve_game_file};
 use crate::util::{now_iso_string, sanitize_file_name, unique_id};
+
+#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord)]
+pub struct PatchTarget {
+    pub source_group: String,
+    pub game_file: String,
+}
 
 pub fn scan_mod_folder(folder: &Path, packages_dir: Option<&Path>) -> AppResult<Vec<ScanResult>> {
     if !folder.is_dir() {
@@ -20,6 +28,10 @@ pub fn scan_mod_folder(folder: &Path, packages_dir: Option<&Path>) -> AppResult<
     collect_mod_files(folder, &mut files)?;
     files.sort();
 
+    let mut precompiled_dirs = Vec::new();
+    collect_precompiled_dirs(folder, &mut precompiled_dirs)?;
+    precompiled_dirs.sort();
+
     let indexes = if let Some(packages_dir) = packages_dir {
         let pamt_info = read_pamt_raw(&packages_dir.join("0008").join("0.pamt"))?;
         Some(build_file_index(&pamt_info))
@@ -29,7 +41,11 @@ pub fn scan_mod_folder(folder: &Path, packages_dir: Option<&Path>) -> AppResult<
 
     let mut results = Vec::new();
     for path in files {
-        let manifest = load_manifest(&path)?;
+        let manifest = match load_manifest(&path) {
+            Ok(manifest) => manifest,
+            Err(AppError::InvalidMod(_)) => continue,
+            Err(err) => return Err(err),
+        };
         let target_files = target_files(&manifest);
         let (resolvable_files, missing_files) =
             if let Some((ref simple_index, ref full_index)) = indexes {
@@ -49,6 +65,7 @@ pub fn scan_mod_folder(folder: &Path, packages_dir: Option<&Path>) -> AppResult<
 
         results.push(ScanResult {
             path: path.display().to_string(),
+            mod_kind: ModKind::JsonData,
             file_name: path
                 .file_name()
                 .unwrap_or_default()
@@ -68,7 +85,37 @@ pub fn scan_mod_folder(folder: &Path, packages_dir: Option<&Path>) -> AppResult<
         });
     }
 
+    for dir in precompiled_dirs {
+        let record = inspect_precompiled_dir(&dir)?;
+        results.push(ScanResult {
+            path: dir.display().to_string(),
+            mod_kind: ModKind::PrecompiledOverlay,
+            file_name: dir
+                .file_name()
+                .unwrap_or_default()
+                .to_string_lossy()
+                .to_string(),
+            name: record.name,
+            description: record.description,
+            patch_count: record.patch_count,
+            change_count: record.change_count,
+            target_files: record.target_files,
+            resolvable_files: 0,
+            missing_files: Vec::new(),
+        });
+    }
+
     Ok(results)
+}
+
+pub fn detect_import_kind(path: &Path) -> AppResult<ModKind> {
+    if path.is_dir() {
+        inspect_precompiled_dir(path)?;
+        return Ok(ModKind::PrecompiledOverlay);
+    }
+
+    load_manifest(path)?;
+    Ok(ModKind::JsonData)
 }
 
 pub fn import_mod(
@@ -79,15 +126,6 @@ pub fn import_mod(
     mod_kind: ModKind,
     language: Option<String>,
 ) -> AppResult<ModRecord> {
-    let manifest = load_manifest(source_path)?;
-    let description = manifest.description.clone();
-    let patch_count = manifest.patches.len();
-    let change_count = manifest
-        .patches
-        .iter()
-        .map(|patch| patch.changes.len())
-        .sum();
-    let target_files = target_files(&manifest);
     let mod_id = unique_id("mod");
     let file_name = source_path
         .file_name()
@@ -96,14 +134,47 @@ pub fn import_mod(
         .to_string();
     let stored_name = format!("{}_{}", mod_id, sanitize_file_name(&file_name));
     let library_path = app_data_dir.join("mods").join("library").join(stored_name);
-    fs::copy(source_path, &library_path)?;
+
+    let (name, description, patch_count, change_count, target_files) = match mod_kind {
+        ModKind::JsonData | ModKind::Language => {
+            let manifest = load_manifest(source_path)?;
+            let description = manifest.description.clone();
+            let patch_count = manifest.patches.len();
+            let change_count = manifest
+                .patches
+                .iter()
+                .map(|patch| patch.changes.len())
+                .sum();
+            let target_files = target_files(&manifest);
+            fs::copy(source_path, &library_path)?;
+
+            (
+                manifest.name,
+                description,
+                patch_count,
+                change_count,
+                target_files,
+            )
+        }
+        ModKind::PrecompiledOverlay => {
+            let record = inspect_precompiled_dir(source_path)?;
+            copy_dir_all(source_path, &library_path)?;
+            (
+                record.name,
+                record.description,
+                record.patch_count,
+                record.change_count,
+                record.target_files,
+            )
+        }
+    };
 
     let now = now_iso_string();
     let load_order = db::next_load_order(connection)?;
     let record = ModRecord {
         id: mod_id,
         mod_kind,
-        name: manifest.name,
+        name,
         description,
         file_name,
         source_path: Some(source_path.display().to_string()),
@@ -125,16 +196,43 @@ pub fn import_mod(
 
 pub fn load_manifest(path: &Path) -> AppResult<ModManifest> {
     let raw = fs::read_to_string(path)?;
-    let manifest: ModManifest = serde_json::from_str(raw.trim_start_matches('\u{feff}'))?;
+    let value: Value = serde_json::from_str(raw.trim_start_matches('\u{feff}'))?;
+    let patches_value = value
+        .get("patches")
+        .cloned()
+        .ok_or_else(|| AppError::InvalidMod(format!("{} is not a patch manifest", path.display())))?;
+    let patches: Vec<ModPatch> = serde_json::from_value(patches_value)?;
 
-    if manifest.patches.is_empty() {
+    if patches.is_empty() {
         return Err(AppError::InvalidMod(format!(
             "{} does not contain any patches",
             path.display()
         )));
     }
 
-    Ok(manifest)
+    let modinfo = value.get("modinfo");
+    let name = first_string(&[
+        value.get("name"),
+        value.get("title"),
+        modinfo.and_then(|value| value.get("name")),
+        modinfo.and_then(|value| value.get("title")),
+    ])
+    .unwrap_or_else(|| {
+        path.file_stem()
+            .unwrap_or_default()
+            .to_string_lossy()
+            .to_string()
+    });
+    let description = first_string(&[
+        value.get("description"),
+        modinfo.and_then(|value| value.get("description")),
+    ]);
+
+    Ok(ModManifest {
+        name,
+        description,
+        patches,
+    })
 }
 
 pub fn load_enabled_manifests(records: &[ModRecord]) -> AppResult<Vec<(ModRecord, ModManifest)>> {
@@ -156,6 +254,13 @@ pub fn target_files(manifest: &ModManifest) -> Vec<String> {
         files.insert(patch.game_file.clone());
     }
     files.into_iter().collect()
+}
+
+fn first_string(values: &[Option<&Value>]) -> Option<String> {
+    values
+        .iter()
+        .flatten()
+        .find_map(|value| value.as_str().map(str::to_string))
 }
 
 fn collect_mod_files(root: &Path, output: &mut Vec<PathBuf>) -> AppResult<()> {
@@ -189,14 +294,185 @@ fn collect_mod_files(root: &Path, output: &mut Vec<PathBuf>) -> AppResult<()> {
     Ok(())
 }
 
+fn collect_precompiled_dirs(root: &Path, output: &mut Vec<PathBuf>) -> AppResult<()> {
+    if is_precompiled_dir(root) {
+        output.push(root.to_path_buf());
+        return Ok(());
+    }
+
+    for entry in fs::read_dir(root)? {
+        let entry = entry?;
+        let path = entry.path();
+        if path.is_dir() {
+            collect_precompiled_dirs(&path, output)?;
+        }
+    }
+
+    Ok(())
+}
+
+fn is_precompiled_dir(root: &Path) -> bool {
+    let Ok(entries) = fs::read_dir(root) else {
+        return false;
+    };
+
+    entries.flatten().any(|entry| {
+        let path = entry.path();
+        path.is_dir()
+            && path
+                .file_name()
+                .and_then(|value| value.to_str())
+                .is_some_and(|name| name.len() == 4 && name.chars().all(|ch| ch.is_ascii_digit()))
+            && path.join("0.pamt").is_file()
+            && path.join("0.paz").is_file()
+    })
+}
+
+fn inspect_precompiled_dir(root: &Path) -> AppResult<ModRecord> {
+    if !is_precompiled_dir(root) {
+        return Err(AppError::InvalidMod(format!(
+            "{} is not a precompiled overlay directory",
+            root.display()
+        )));
+    }
+
+    let name = read_precompiled_name(root).unwrap_or_else(|| {
+        root.file_name()
+            .unwrap_or_default()
+            .to_string_lossy()
+            .to_string()
+    });
+    let description = read_precompiled_description(root);
+    let target_files = list_precompiled_groups(root)?;
+
+    Ok(ModRecord {
+        id: String::new(),
+        mod_kind: ModKind::PrecompiledOverlay,
+        name,
+        description,
+        file_name: root
+            .file_name()
+            .unwrap_or_default()
+            .to_string_lossy()
+            .to_string(),
+        source_path: Some(root.display().to_string()),
+        library_path: root.display().to_string(),
+        enabled: false,
+        load_order: 0,
+        language: None,
+        install_group: None,
+        patch_count: target_files.len(),
+        change_count: 0,
+        target_files,
+        imported_at: String::new(),
+        updated_at: String::new(),
+    })
+}
+
+fn read_precompiled_name(root: &Path) -> Option<String> {
+    for candidate in ["modinfo.json", "manifest.json", "mod.json"] {
+        let path = root.join(candidate);
+        if !path.is_file() {
+            continue;
+        }
+
+        let raw = fs::read_to_string(path).ok()?;
+        let value: Value = serde_json::from_str(&raw).ok()?;
+        let modinfo = value.get("modinfo");
+
+        if let Some(name) = first_string(&[
+            value.get("name"),
+            value.get("title"),
+            value.get("id"),
+            modinfo.and_then(|value| value.get("name")),
+            modinfo.and_then(|value| value.get("title")),
+        ]) {
+            return Some(name);
+        }
+    }
+
+    None
+}
+
+fn read_precompiled_description(root: &Path) -> Option<String> {
+    for candidate in ["modinfo.json", "manifest.json", "mod.json"] {
+        let path = root.join(candidate);
+        if !path.is_file() {
+            continue;
+        }
+
+        let raw = fs::read_to_string(path).ok()?;
+        let value: Value = serde_json::from_str(&raw).ok()?;
+        let modinfo = value.get("modinfo");
+
+        if let Some(description) = first_string(&[
+            value.get("description"),
+            modinfo.and_then(|value| value.get("description")),
+        ]) {
+            return Some(description);
+        }
+    }
+
+    None
+}
+
+fn list_precompiled_groups(root: &Path) -> AppResult<Vec<String>> {
+    let mut groups = Vec::new();
+    for entry in fs::read_dir(root)? {
+        let entry = entry?;
+        let path = entry.path();
+        if !path.is_dir() {
+            continue;
+        }
+
+        let Some(name) = path.file_name().and_then(|value| value.to_str()) else {
+            continue;
+        };
+
+        if name.len() == 4
+            && name.chars().all(|ch| ch.is_ascii_digit())
+            && path.join("0.pamt").is_file()
+            && path.join("0.paz").is_file()
+        {
+            groups.push(name.to_string());
+        }
+    }
+    groups.sort();
+    Ok(groups)
+}
+
+fn copy_dir_all(source: &Path, destination: &Path) -> AppResult<()> {
+    fs::create_dir_all(destination)?;
+
+    for entry in fs::read_dir(source)? {
+        let entry = entry?;
+        let entry_path = entry.path();
+        let target_path = destination.join(entry.file_name());
+        if entry_path.is_dir() {
+            copy_dir_all(&entry_path, &target_path)?;
+        } else {
+            fs::copy(&entry_path, &target_path)?;
+        }
+    }
+
+    Ok(())
+}
+
 pub fn merged_changes(
     enabled_mods: &[(ModRecord, ModManifest)],
-) -> BTreeMap<String, Vec<(String, crate::models::ModChange)>> {
+) -> BTreeMap<PatchTarget, Vec<(String, ModChange)>> {
     let mut merged = BTreeMap::new();
     for (record, manifest) in enabled_mods {
         for patch in &manifest.patches {
+            let target = PatchTarget {
+                source_group: patch
+                    .source_group
+                    .clone()
+                    .unwrap_or_else(|| "0008".to_string()),
+                game_file: patch.game_file.clone(),
+            };
             let entry = merged
-                .entry(patch.game_file.clone())
+                .entry(target)
                 .or_insert_with(Vec::new);
             for change in &patch.changes {
                 entry.push((format!("{}#{}", record.name, record.load_order), change.clone()));

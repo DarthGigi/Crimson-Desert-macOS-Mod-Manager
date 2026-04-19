@@ -8,7 +8,6 @@ use crate::error::{AppError, AppResult};
 use crate::models::GameInstallInfo;
 
 pub const SOURCE_GROUP: &str = "0008";
-pub const MOD_GROUP: &str = "0036";
 
 fn is_valid_packages_dir(path: &Path) -> bool {
     path.join("meta").join("0.papgt").is_file() && path.join(SOURCE_GROUP).join("0.pamt").is_file()
