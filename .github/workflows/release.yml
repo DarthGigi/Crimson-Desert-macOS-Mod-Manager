@@ -79,8 +79,11 @@ jobs:
           DMG_PATH=$(find src-tauri/target/${{ matrix.target }}/release/bundle/dmg -maxdepth 1 -name '*.dmg' -print -quit)
           LATEST_JSON=$(find src-tauri/target/${{ matrix.target }}/release/bundle -name 'latest.json' -print -quit)
           UPDATER_ARTIFACTS=$(find src-tauri/target/${{ matrix.target }}/release/bundle -type f \( -name '*.tar.gz' -o -name '*.tar.gz.sig' \) -print)
+          STABLE_DMG=$(dirname "$DMG_PATH")/Crimson-Desert-Mod-Manager-macOS-arm64-latest.dmg
+          cp "$DMG_PATH" "$STABLE_DMG"
           echo "app_path=$APP_PATH" >> "$GITHUB_OUTPUT"
           echo "dmg_path=$DMG_PATH" >> "$GITHUB_OUTPUT"
+          echo "stable_dmg=$STABLE_DMG" >> "$GITHUB_OUTPUT"
           echo "latest_json=$LATEST_JSON" >> "$GITHUB_OUTPUT"
           {
             echo 'updater_artifacts<<EOF'
@@ -100,6 +103,12 @@ jobs:
           name: Crimson-Desert-Mod-Manager-${{ matrix.arch }}-dmg
           path: ${{ steps.bundle_paths.outputs.dmg_path }}
 
+      - name: Upload stable latest dmg artifact
+        uses: actions/upload-artifact@v7
+        with:
+          name: Crimson-Desert-Mod-Manager-${{ matrix.arch }}-dmg-latest
+          path: ${{ steps.bundle_paths.outputs.stable_dmg }}
+
       - name: Upload updater metadata
         if: steps.bundle_paths.outputs.latest_json != ''
         uses: actions/upload-artifact@v7
@@ -117,7 +126,9 @@ jobs:
       - name: Attest dmg artifact
         uses: actions/attest@v4
         with:
-          subject-path: ${{ steps.bundle_paths.outputs.dmg_path }}
+          subject-path: |
+            ${{ steps.bundle_paths.outputs.dmg_path }}
+            ${{ steps.bundle_paths.outputs.stable_dmg }}
 
       - name: Attest updater artifacts
         if: steps.bundle_paths.outputs.latest_json != ''
@@ -135,6 +146,7 @@ jobs:
           files: |
             ${{ steps.bundle_paths.outputs.app_path }}
             ${{ steps.bundle_paths.outputs.dmg_path }}
+            ${{ steps.bundle_paths.outputs.stable_dmg }}
             ${{ steps.bundle_paths.outputs.latest_json }}
             ${{ steps.bundle_paths.outputs.updater_artifacts }}
           draft: false
