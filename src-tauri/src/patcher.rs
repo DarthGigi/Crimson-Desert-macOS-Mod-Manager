@@ -1094,3 +1094,129 @@ fn decode_nibble(value: u8) -> Result<u8, String> {
         _ => Err(format!("invalid hex character '{}'", value as char)),
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use std::fs;
+    use std::os::unix::fs::symlink;
+    use std::path::{Path, PathBuf};
+    use std::sync::{LazyLock, Mutex};
+    use std::time::{SystemTime, UNIX_EPOCH};
+
+    use crate::db;
+    use crate::mods;
+
+    use super::*;
+
+    const GAME_PACKAGES_DIR: &str = "/Users/gigi/Games/Crimson Desert.app/Contents/Resources/packages";
+    const DOWNLOADED_MODS_DIR: &str = "/Users/gigi/Downloads/CD Mods";
+    static TEST_MUTEX: LazyLock<Mutex<()>> = LazyLock::new(|| Mutex::new(()));
+
+    #[test]
+    fn applies_real_json_mod_in_sandbox() {
+        let _guard = TEST_MUTEX.lock().unwrap();
+        let sandbox = make_sandbox().unwrap();
+        let connection = db::connect(&sandbox.app_data_dir).unwrap();
+        let mod_path = Path::new(DOWNLOADED_MODS_DIR)
+            .join("stamina_json_v1.02.00")
+            .join("stamina_v1.02.00_infinite.json");
+
+        mods::import_mod(
+            &sandbox.app_data_dir,
+            &connection,
+            &mod_path,
+            true,
+            crate::models::ModKind::JsonData,
+            None,
+        )
+        .unwrap();
+
+        let records = db::list_mods(&connection).unwrap();
+        let result = apply_mods(&sandbox.packages_dir, &records, &[], None).unwrap();
+
+        assert!(!result.created_groups.is_empty());
+        let group_dir = sandbox.packages_dir.join(&result.created_groups[0]);
+        assert!(group_dir.join("0.paz").is_file());
+        assert!(group_dir.join("0.pamt").is_file());
+        assert!(sandbox.packages_dir.join("meta").join("0.papgt").is_file());
+        assert!(sandbox.packages_dir.join("meta").join("0.papgt.bak").is_file());
+    }
+
+    #[test]
+    fn applies_real_browser_raw_mod_in_sandbox() {
+        let _guard = TEST_MUTEX.lock().unwrap();
+        let sandbox = make_sandbox().unwrap();
+        let connection = db::connect(&sandbox.app_data_dir).unwrap();
+        let mod_path = Path::new(DOWNLOADED_MODS_DIR).join("Better_Inventory_UI_Compatible");
+
+        mods::import_mod(
+            &sandbox.app_data_dir,
+            &connection,
+            &mod_path,
+            true,
+            crate::models::ModKind::BrowserRaw,
+            None,
+        )
+        .unwrap();
+
+        let records = db::list_mods(&connection).unwrap();
+        let result = apply_mods(&sandbox.packages_dir, &records, &[], None).unwrap();
+
+        assert!(!result.created_groups.is_empty());
+        let group_dir = sandbox.packages_dir.join(&result.created_groups[0]);
+        assert!(group_dir.join("0.paz").is_file());
+        assert!(group_dir.join("0.pamt").is_file());
+    }
+
+    struct Sandbox {
+        root: PathBuf,
+        packages_dir: PathBuf,
+        app_data_dir: PathBuf,
+    }
+
+    impl Drop for Sandbox {
+        fn drop(&mut self) {
+            let _ = fs::remove_dir_all(&self.root);
+        }
+    }
+
+    fn make_sandbox() -> AppResult<Sandbox> {
+        let base = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .unwrap_or_default()
+            .as_nanos();
+        let mut root = std::env::temp_dir().join(format!("cdmm_sandbox_{base}"));
+        let mut suffix = 0u32;
+        while root.exists() {
+            suffix += 1;
+            root = std::env::temp_dir().join(format!("cdmm_sandbox_{base}_{suffix}"));
+        }
+        let packages_dir = root.join("packages");
+        let app_data_dir = root.join("app_data");
+        fs::create_dir_all(&packages_dir)?;
+        fs::create_dir_all(&app_data_dir)?;
+
+        let real_packages = Path::new(GAME_PACKAGES_DIR);
+        for entry in fs::read_dir(real_packages)? {
+            let entry = entry?;
+            let path = entry.path();
+            let file_name = entry.file_name();
+            let target = packages_dir.join(&file_name);
+
+            if path.is_dir() {
+                if file_name == "meta" {
+                    fs::create_dir_all(&target)?;
+                    fs::copy(path.join("0.papgt"), target.join("0.papgt"))?;
+                } else {
+                    symlink(&path, &target)?;
+                }
+            }
+        }
+
+        Ok(Sandbox {
+            root,
+            packages_dir,
+            app_data_dir,
+        })
+    }
+}
