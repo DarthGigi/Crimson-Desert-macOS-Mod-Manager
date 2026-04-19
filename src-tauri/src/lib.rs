@@ -37,6 +37,7 @@ const SETTINGS_ISOLATION_SESSION: &str = "problem_mod_isolation_session";
 
 struct AppState {
     app_data_dir: PathBuf,
+    bundled_7z_path: Option<PathBuf>,
     operation_lock: Mutex<()>,
 }
 
@@ -61,6 +62,12 @@ fn app_state(app: &AppHandle) -> Result<AppState, AppError> {
         .map_err(|err| AppError::Other(format!("Could not resolve app data dir: {err}")))?;
     Ok(AppState {
         app_data_dir,
+        bundled_7z_path: app
+            .path()
+            .resource_dir()
+            .ok()
+            .map(|dir| dir.join("binaries").join("7z"))
+            .filter(|path| path.is_file()),
         operation_lock: Mutex::new(()),
     })
 }
@@ -261,6 +268,7 @@ fn scan_mod_folder_command(
         Path::new(&folder_path),
         packages_dir.as_deref(),
         &state.app_data_dir,
+        state.bundled_7z_path.as_deref(),
     )
     .map_err(ErrorPayload::from)
 }

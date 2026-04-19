@@ -165,6 +165,7 @@ pub fn scan_import_source(
     source: &Path,
     packages_dir: Option<&Path>,
     app_data_dir: &Path,
+    bundled_7z_path: Option<&Path>,
 ) -> AppResult<Vec<ScanResult>> {
     if source.is_dir() {
         return scan_mod_folder(source, packages_dir);
@@ -181,7 +182,7 @@ pub fn scan_import_source(
     }
 
     if extension == "7z" || extension == "rar" {
-        let extracted_root = extract_archive_with_7z(source, app_data_dir)?;
+        let extracted_root = extract_archive_with_7z(source, app_data_dir, bundled_7z_path)?;
         return scan_mod_folder(&extracted_root, packages_dir);
     }
 
@@ -1015,14 +1016,18 @@ fn extract_zip_to_cache(source: &Path, app_data_dir: &Path) -> AppResult<PathBuf
     Ok(cache_dir)
 }
 
-fn extract_archive_with_7z(source: &Path, app_data_dir: &Path) -> AppResult<PathBuf> {
+fn extract_archive_with_7z(
+    source: &Path,
+    app_data_dir: &Path,
+    bundled_7z_path: Option<&Path>,
+) -> AppResult<PathBuf> {
     let cache_root = app_data_dir.join("mods").join("import-cache");
     fs::create_dir_all(&cache_root)?;
 
     let cache_dir = cache_root.join(unique_id("archive"));
     fs::create_dir_all(&cache_dir)?;
 
-    let tool = find_7z_tool().ok_or_else(|| {
+    let tool = find_7z_tool(bundled_7z_path).ok_or_else(|| {
         AppError::Other(
             "`7z` is not available on this system, so .7z/.rar archives cannot be imported"
                 .to_string(),
@@ -1045,14 +1050,18 @@ fn extract_archive_with_7z(source: &Path, app_data_dir: &Path) -> AppResult<Path
     Ok(cache_dir)
 }
 
-fn find_7z_tool() -> Option<&'static str> {
+fn find_7z_tool(bundled_7z_path: Option<&Path>) -> Option<PathBuf> {
+    if let Some(path) = bundled_7z_path.filter(|path| path.is_file()) {
+        return Some(path.to_path_buf());
+    }
+
     for tool in ["/opt/homebrew/bin/7z", "/usr/local/bin/7z", "7z"] {
         if tool.contains('/') {
             if Path::new(tool).is_file() {
-                return Some(tool);
+                return Some(PathBuf::from(tool));
             }
         } else if Command::new(tool).arg("--help").output().is_ok() {
-            return Some(tool);
+            return Some(PathBuf::from(tool));
         }
     }
 
@@ -1201,7 +1210,7 @@ mod tests {
         add_dir_to_zip(&browser_raw_mod, &browser_raw_mod, &mut zip).unwrap();
         zip.finish().unwrap();
 
-        let results = scan_import_source(&zip_path, None, &temp_root).unwrap();
+        let results = scan_import_source(&zip_path, None, &temp_root, None).unwrap();
         assert!(results.iter().any(|result| {
             result.mod_kind == ModKind::BrowserRaw
                 && result.name == "Better Inventory UI compatible with BTM"
@@ -1212,7 +1221,7 @@ mod tests {
 
     #[test]
     fn scans_7z_archive_and_finds_browser_raw_mod() {
-        let Some(tool) = find_7z_tool() else {
+        let Some(tool) = find_7z_tool(None) else {
             return;
         };
 
@@ -1236,7 +1245,7 @@ mod tests {
             .unwrap();
         assert!(status.success());
 
-        let results = scan_import_source(&archive_path, None, &temp_root).unwrap();
+        let results = scan_import_source(&archive_path, None, &temp_root, None).unwrap();
         assert!(results.iter().any(|result| {
             result.mod_kind == ModKind::BrowserRaw
                 && result.name == "Better Inventory UI compatible with BTM"
