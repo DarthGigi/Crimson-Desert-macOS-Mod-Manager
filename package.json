@@ -1,6 +1,6 @@
 {
 	"name": "crimson-desert-macos-mod-manager",
-	"version": "0.1.1",
+	"version": "0.1.2",
 	"description": "A macOS mod manager for Crimson Desert with JSON, overlay, PATHC, and archive workflows.",
 	"type": "module",
 	"repository": {
@@ -16,7 +16,7 @@
 		"version-packages": "changeset version && node ./scripts/sync-version.mjs",
 		"check": "svelte-kit sync && svelte-check --tsconfig ./tsconfig.json",
 		"check:watch": "svelte-kit sync && svelte-check --tsconfig ./tsconfig.json --watch",
-		"tauri": "tauri",
+		"tauri": "node ./scripts/tauri-wrapper.mjs",
 		"lint": "prettier --check . && eslint .",
 		"format": "prettier --write .",
 		"prepare": "svelte-kit sync || echo ''"

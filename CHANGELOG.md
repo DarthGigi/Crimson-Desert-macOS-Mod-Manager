@@ -1,5 +1,11 @@
 # crimson-desert-macos-mod-manager
 
+## 0.1.2
+
+### Patch Changes
+
+- 31493fc: Force the styled DMG build path on CI so release DMGs are more likely to preserve the configured background image and icon positions.
+
 ## 0.1.1
 
 ### Patch Changes
