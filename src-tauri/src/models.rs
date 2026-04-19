@@ -161,6 +161,18 @@ pub struct ApplyPreview {
     pub files: Vec<ApplyPreviewFile>,
 }
 
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ModPatchSummary {
+    pub mod_id: String,
+    pub patch_index: usize,
+    pub title: String,
+    pub source_group: String,
+    pub game_file: String,
+    pub change_count: usize,
+    pub enabled: bool,
+}
+
 #[derive(Debug, Clone)]
 pub struct ManagedGroupRecord {
     pub group_name: String,

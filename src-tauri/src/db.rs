@@ -1,3 +1,4 @@
+use std::collections::{BTreeMap, BTreeSet};
 use std::fs;
 use std::path::{Path, PathBuf};
 
@@ -59,11 +60,19 @@ pub fn connect(app_data_dir: &Path) -> AppResult<Connection> {
 		   created_at TEXT NOT NULL
 		 );
 
-		 CREATE TABLE IF NOT EXISTS managed_groups (
+         CREATE TABLE IF NOT EXISTS managed_groups (
 		   group_name TEXT PRIMARY KEY,
 		   purpose TEXT NOT NULL,
 		   source_mod_id TEXT,
 		   created_at TEXT NOT NULL
+		 );
+
+		 CREATE TABLE IF NOT EXISTS patch_toggles (
+		   mod_id TEXT NOT NULL,
+		   patch_index INTEGER NOT NULL,
+		   enabled INTEGER NOT NULL,
+		   updated_at TEXT NOT NULL,
+		   PRIMARY KEY (mod_id, patch_index)
 		 );",
     )?;
 
@@ -240,6 +249,52 @@ pub fn replace_managed_groups(
 
 pub fn clear_managed_groups(connection: &Connection) -> AppResult<()> {
     connection.execute("DELETE FROM managed_groups", [])?;
+    Ok(())
+}
+
+pub fn list_disabled_patch_indexes(connection: &Connection) -> AppResult<BTreeMap<String, BTreeSet<usize>>> {
+    let mut statement = connection.prepare(
+        "SELECT mod_id, patch_index
+         FROM patch_toggles
+         WHERE enabled = 0
+         ORDER BY mod_id ASC, patch_index ASC",
+    )?;
+
+    let rows = statement.query_map([], |row| {
+        Ok((row.get::<_, String>(0)?, row.get::<_, i64>(1)? as usize))
+    })?;
+
+    let mut disabled = BTreeMap::<String, BTreeSet<usize>>::new();
+    for row in rows {
+        let (mod_id, patch_index) = row?;
+        disabled.entry(mod_id).or_default().insert(patch_index);
+    }
+
+    Ok(disabled)
+}
+
+pub fn set_patch_enabled(
+    connection: &Connection,
+    mod_id: &str,
+    patch_index: usize,
+    enabled: bool,
+) -> AppResult<()> {
+    if enabled {
+        connection.execute(
+            "DELETE FROM patch_toggles WHERE mod_id = ?1 AND patch_index = ?2",
+            params![mod_id, patch_index as i64],
+        )?;
+    } else {
+        connection.execute(
+            "INSERT INTO patch_toggles(mod_id, patch_index, enabled, updated_at)
+             VALUES (?1, ?2, 0, ?3)
+             ON CONFLICT(mod_id, patch_index) DO UPDATE SET
+               enabled = 0,
+               updated_at = excluded.updated_at",
+            params![mod_id, patch_index as i64, now_iso_string()],
+        )?;
+    }
+
     Ok(())
 }
 

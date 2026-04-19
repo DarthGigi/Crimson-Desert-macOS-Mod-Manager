@@ -11,14 +11,14 @@ use std::sync::Mutex;
 
 use db::{
     clear_managed_groups, connect, get_setting, insert_history, list_managed_groups, list_mods,
-    move_mod_in_load_order, replace_managed_groups, set_setting, update_mod_classification,
-    update_mod_enabled,
+    list_disabled_patch_indexes, move_mod_in_load_order, replace_managed_groups, set_patch_enabled,
+    set_setting, update_mod_classification, update_mod_enabled,
 };
 use error::{AppError, ErrorPayload};
 use game::{
     detect_packages_dir, inspect_game_install, launch_game, resolve_to_packages_dir, LaunchResult,
 };
-use models::{ApplyPreview, ApplyResult, DashboardData, GameInstallInfo, ModKind, ModRecord, ScanResult, StatusSummary};
+use models::{ApplyPreview, ApplyResult, DashboardData, GameInstallInfo, ModKind, ModPatchSummary, ModRecord, ScanResult, StatusSummary};
 use tauri::{AppHandle, Manager, State};
 
 const SETTINGS_GAME_PATH: &str = "game_packages_path";
@@ -274,6 +274,44 @@ fn move_mod_in_load_order_command(
 }
 
 #[tauri::command]
+fn get_mod_patch_summaries_command(
+    mod_id: String,
+    state: State<'_, AppState>,
+) -> Result<Vec<ModPatchSummary>, ErrorPayload> {
+    let connection = state.connection().map_err(ErrorPayload::from)?;
+    let mods = list_mods(&connection).map_err(ErrorPayload::from)?;
+    let record = mods
+        .iter()
+        .find(|record| record.id == mod_id)
+        .ok_or_else(|| ErrorPayload {
+            message: format!("No mod found for id {mod_id}"),
+        })?;
+    let manifest = mods::load_manifest(Path::new(&record.library_path)).map_err(ErrorPayload::from)?;
+    let disabled = list_disabled_patch_indexes(&connection).map_err(ErrorPayload::from)?;
+    Ok(mods::patch_summaries(&mod_id, &manifest, disabled.get(&mod_id)))
+}
+
+#[tauri::command]
+fn set_patch_enabled_command(
+    mod_id: String,
+    patch_index: usize,
+    enabled: bool,
+    state: State<'_, AppState>,
+) -> Result<DashboardData, ErrorPayload> {
+    let connection = state.connection().map_err(ErrorPayload::from)?;
+    set_patch_enabled(&connection, &mod_id, patch_index, enabled).map_err(ErrorPayload::from)?;
+    insert_history(
+        &connection,
+        "toggle_patch",
+        "ok",
+        &format!("{} patch {patch_index} for mod {mod_id}", if enabled { "Enabled" } else { "Disabled" }),
+        None,
+    )
+    .map_err(ErrorPayload::from)?;
+    build_dashboard(&connection).map_err(ErrorPayload::from)
+}
+
+#[tauri::command]
 fn apply_mods_command(state: State<'_, AppState>) -> Result<ApplyResult, ErrorPayload> {
     let _guard = state.operation_lock.lock().map_err(|_| ErrorPayload {
         message: "Operation lock poisoned".to_string(),
@@ -286,10 +324,17 @@ fn apply_mods_command(state: State<'_, AppState>) -> Result<ApplyResult, ErrorPa
         })?;
     let mods = list_mods(&connection).map_err(ErrorPayload::from)?;
     let managed_groups = list_managed_groups(&connection).map_err(ErrorPayload::from)?;
+    let disabled_patches = list_disabled_patch_indexes(&connection).map_err(ErrorPayload::from)?;
     let selected_language = get_setting(&connection, SETTINGS_GAME_LANGUAGE)
         .map_err(ErrorPayload::from)?
         .filter(|value| !value.is_empty());
-    let result = patcher::apply_mods(&packages_dir, &mods, &managed_groups, selected_language.as_deref())
+    let result = patcher::apply_mods(
+        &packages_dir,
+        &mods,
+        &managed_groups,
+        selected_language.as_deref(),
+        &disabled_patches,
+    )
         .map_err(ErrorPayload::from)?;
     let replacement_groups = patcher::managed_group_records(&result.created_groups, "json_overlay");
     replace_managed_groups(&mut connection, &replacement_groups).map_err(ErrorPayload::from)?;
@@ -307,10 +352,12 @@ fn get_apply_preview_command(state: State<'_, AppState>) -> Result<ApplyPreview,
             message: "Set the Crimson Desert game path first.".to_string(),
         })?;
     let mods = list_mods(&connection).map_err(ErrorPayload::from)?;
+    let disabled_patches = list_disabled_patch_indexes(&connection).map_err(ErrorPayload::from)?;
     let selected_language = get_setting(&connection, SETTINGS_GAME_LANGUAGE)
         .map_err(ErrorPayload::from)?
         .filter(|value| !value.is_empty());
-    patcher::preview_apply(&packages_dir, &mods, selected_language.as_deref()).map_err(ErrorPayload::from)
+    patcher::preview_apply(&packages_dir, &mods, selected_language.as_deref(), &disabled_patches)
+        .map_err(ErrorPayload::from)
 }
 
 #[tauri::command]
@@ -394,6 +441,8 @@ pub fn run() {
             set_selected_language_command,
             set_mod_classification_command,
             move_mod_in_load_order_command,
+            get_mod_patch_summaries_command,
+            set_patch_enabled_command,
             get_apply_preview_command,
             apply_mods_command,
             restore_vanilla_command,

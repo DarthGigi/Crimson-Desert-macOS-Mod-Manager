@@ -86,6 +86,16 @@ export type ApplyPreview = {
 	files: ApplyPreviewFile[];
 };
 
+export type ModPatchSummary = {
+	modId: string;
+	patchIndex: number;
+	title: string;
+	sourceGroup: string;
+	gameFile: string;
+	changeCount: number;
+	enabled: boolean;
+};
+
 export type StatusSummary = {
 	gameInstall: GameInstallInfo | null;
 	selectedLanguage: string | null;
@@ -141,6 +151,14 @@ export async function setModClassification(modId: string, modKind: ModKind, lang
 
 export async function moveModInLoadOrder(modId: string, direction: 'up' | 'down') {
 	return invoke<DashboardData>('move_mod_in_load_order_command', { modId, direction });
+}
+
+export async function getModPatchSummaries(modId: string) {
+	return invoke<ModPatchSummary[]>('get_mod_patch_summaries_command', { modId });
+}
+
+export async function setPatchEnabled(modId: string, patchIndex: number, enabled: boolean) {
+	return invoke<DashboardData>('set_patch_enabled_command', { modId, patchIndex, enabled });
 }
 
 export async function applyMods() {

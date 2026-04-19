@@ -6,7 +6,7 @@ use serde_json::Value;
 
 use crate::db;
 use crate::error::{AppError, AppResult};
-use crate::models::{ModChange, ModKind, ModManifest, ModPatch, ModRecord, ScanResult};
+use crate::models::{ModChange, ModKind, ModManifest, ModPatch, ModPatchSummary, ModRecord, ScanResult};
 use crate::patcher::{build_file_index, read_pamt_raw, resolve_game_file};
 use crate::util::{now_iso_string, sanitize_file_name, unique_id};
 
@@ -281,6 +281,7 @@ pub fn load_manifest(path: &Path) -> AppResult<ModManifest> {
 pub fn load_enabled_manifests(
     records: &[ModRecord],
     selected_language: Option<&str>,
+    disabled_patches: &BTreeMap<String, BTreeSet<usize>>,
 ) -> AppResult<Vec<(ModRecord, ModManifest)>> {
     let mut mods = Vec::new();
     for record in records
@@ -298,10 +299,38 @@ pub fn load_enabled_manifests(
         })
     {
         let manifest = load_manifest(Path::new(&record.library_path))?;
+        let manifest = filter_disabled_patches(manifest, disabled_patches.get(&record.id));
+        if manifest.patches.is_empty() {
+            continue;
+        }
         mods.push((record.clone(), manifest));
     }
     mods.sort_by_key(|(record, _)| record.load_order);
     Ok(mods)
+}
+
+pub fn patch_summaries(
+    mod_id: &str,
+    manifest: &ModManifest,
+    disabled_patches: Option<&BTreeSet<usize>>,
+) -> Vec<ModPatchSummary> {
+    manifest
+        .patches
+        .iter()
+        .enumerate()
+        .map(|(patch_index, patch)| ModPatchSummary {
+            mod_id: mod_id.to_string(),
+            patch_index,
+            title: patch_title(patch),
+            source_group: patch
+                .source_group
+                .clone()
+                .unwrap_or_else(|| "0008".to_string()),
+            game_file: patch.game_file.clone(),
+            change_count: patch.changes.len(),
+            enabled: !disabled_patches.is_some_and(|disabled| disabled.contains(&patch_index)),
+        })
+        .collect()
 }
 
 pub fn target_files(manifest: &ModManifest) -> Vec<String> {
@@ -687,6 +716,31 @@ pub fn merged_changes(
         }
     }
     merged
+}
+
+fn filter_disabled_patches(
+    mut manifest: ModManifest,
+    disabled_patches: Option<&BTreeSet<usize>>,
+) -> ModManifest {
+    let Some(disabled_patches) = disabled_patches else {
+        return manifest;
+    };
+
+    manifest.patches = manifest
+        .patches
+        .into_iter()
+        .enumerate()
+        .filter_map(|(patch_index, patch)| (!disabled_patches.contains(&patch_index)).then_some(patch))
+        .collect();
+    manifest
+}
+
+fn patch_title(patch: &ModPatch) -> String {
+    patch
+        .changes
+        .iter()
+        .find_map(|change| change.label.clone())
+        .unwrap_or_else(|| patch.game_file.clone())
 }
 
 #[cfg(test)]

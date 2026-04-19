@@ -1,4 +1,4 @@
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet};
 use std::fs;
 use std::path::Path;
 
@@ -295,8 +295,9 @@ pub fn apply_mods(
     records: &[ModRecord],
     managed_groups: &[ManagedGroupRecord],
     selected_language: Option<&str>,
+    disabled_patches: &BTreeMap<String, BTreeSet<usize>>,
 ) -> AppResult<ApplyResult> {
-    let enabled_manifests = load_enabled_manifests(records, selected_language)?;
+    let enabled_manifests = load_enabled_manifests(records, selected_language, disabled_patches)?;
     let enabled_precompiled: Vec<ModRecord> = records
         .iter()
         .filter(|record| {
@@ -467,8 +468,9 @@ pub fn preview_apply(
     game_dir: &Path,
     records: &[ModRecord],
     selected_language: Option<&str>,
+    disabled_patches: &BTreeMap<String, BTreeSet<usize>>,
 ) -> AppResult<ApplyPreview> {
-    let enabled_manifests = load_enabled_manifests(records, selected_language)?;
+    let enabled_manifests = load_enabled_manifests(records, selected_language, disabled_patches)?;
     let enabled_dir_backed: Vec<ModRecord> = records
         .iter()
         .filter(|record| {
@@ -1231,7 +1233,7 @@ mod tests {
         .unwrap();
 
         let records = db::list_mods(&connection).unwrap();
-        let result = apply_mods(&sandbox.packages_dir, &records, &[], None).unwrap();
+        let result = apply_mods(&sandbox.packages_dir, &records, &[], None, &BTreeMap::new()).unwrap();
 
         assert!(!result.created_groups.is_empty());
         let group_dir = sandbox.packages_dir.join(&result.created_groups[0]);
@@ -1259,7 +1261,7 @@ mod tests {
         .unwrap();
 
         let records = db::list_mods(&connection).unwrap();
-        let result = apply_mods(&sandbox.packages_dir, &records, &[], None).unwrap();
+        let result = apply_mods(&sandbox.packages_dir, &records, &[], None, &BTreeMap::new()).unwrap();
 
         assert!(!result.created_groups.is_empty());
         let group_dir = sandbox.packages_dir.join(&result.created_groups[0]);

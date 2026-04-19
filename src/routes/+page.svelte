@@ -24,6 +24,7 @@
 		detectGameInstall,
 		getApplyPreview,
 		getDashboard,
+		getModPatchSummaries,
 		importModVariant,
 		launchGame,
 		moveModInLoadOrder,
@@ -32,12 +33,14 @@
 		scanModFolder,
 		setModClassification,
 		setGameInstall,
+		setPatchEnabled,
 		setSelectedLanguage,
 		setModEnabled,
 		type ApplyResult,
 		type ApplyPreview,
 		type DashboardData,
 		type ModKind,
+		type ModPatchSummary,
 		type ModRecord,
 		type ScanResult
 	} from '$lib/desktop-api';
@@ -63,6 +66,8 @@
 
 	let dashboard = $state<DashboardData | null>(null);
 	let applyPreview = $state<ApplyPreview | null>(null);
+	let selectedPatchModId = $state<string | null>(null);
+	let patchSummaries = $state<ModPatchSummary[]>([]);
 	let scanResults = $state<ScanResult[]>([]);
 	let lastApplyResult = $state<ApplyResult | null>(null);
 	let gamePathInput = $state('');
@@ -80,6 +85,7 @@
 		importing: false,
 		applying: false,
 		previewing: false,
+		patches: false,
 		restoring: false,
 		resetting: false,
 		launching: false,
@@ -123,11 +129,35 @@
 		try {
 			dashboard = await getDashboard();
 			gamePathInput = dashboard.status.gameInstall?.packagesPath ?? gamePathInput;
+			if (!selectedPatchModId && orderedJsonMods.length > 0) {
+				selectedPatchModId = orderedJsonMods[0].id;
+			}
+			if (selectedPatchModId && !orderedJsonMods.some((mod) => mod.id === selectedPatchModId)) {
+				selectedPatchModId = orderedJsonMods[0]?.id ?? null;
+			}
+			await refreshPatchSummaries();
 			await refreshPreview();
 		} catch (error) {
 			setError(error, 'Could not load the mod manager dashboard');
 		} finally {
 			busy.boot = false;
+		}
+	}
+
+	async function refreshPatchSummaries() {
+		if (!selectedPatchModId) {
+			patchSummaries = [];
+			return;
+		}
+
+		busy.patches = true;
+		try {
+			patchSummaries = await getModPatchSummaries(selectedPatchModId);
+		} catch (error) {
+			patchSummaries = [];
+			setError(error, 'Could not load patch toggles');
+		} finally {
+			busy.patches = false;
 		}
 	}
 
@@ -364,9 +394,23 @@
 		clearMessage();
 		try {
 			dashboard = await moveModInLoadOrder(mod.id, direction);
+			await refreshPatchSummaries();
+			await refreshPreview();
 			toast.success(`${mod.name} moved ${direction} in JSON load order.`);
 		} catch (error) {
 			setError(error, `Could not move ${mod.name}`);
+		}
+	}
+
+	async function togglePatch(patch: ModPatchSummary) {
+		clearMessage();
+		try {
+			dashboard = await setPatchEnabled(patch.modId, patch.patchIndex, !patch.enabled);
+			await refreshPatchSummaries();
+			await refreshPreview();
+			toast.success(`${patch.title} ${patch.enabled ? 'disabled' : 'enabled'}.`);
+		} catch (error) {
+			setError(error, `Could not update ${patch.title}`);
 		}
 	}
 
@@ -573,6 +617,49 @@
 								</div>
 							{/each}
 						</div>
+					{/if}
+				</Card.Content>
+			</Card.Root>
+
+			<Card.Root>
+				<Card.Header>
+					<Card.Title class="flex items-center gap-2"><Info class="size-5" /> Patch toggles</Card.Title>
+					<Card.Description>Enable or disable individual JSON patch groups before preview and apply.</Card.Description>
+				</Card.Header>
+				<Card.Content class="space-y-4">
+					{#if orderedJsonMods.length === 0}
+						<Alert.Root>
+							<Info class="size-4" />
+							<Alert.Title>No JSON patch groups available</Alert.Title>
+							<Alert.Description>Enable at least one JSON mod to manage individual patch groups.</Alert.Description>
+						</Alert.Root>
+					{:else}
+						<div class="flex flex-wrap gap-2">
+							{#each orderedJsonMods as mod (mod.id)}
+								<Button variant={selectedPatchModId === mod.id ? 'default' : 'outline'} size="sm" onclick={async () => { selectedPatchModId = mod.id; await refreshPatchSummaries(); }}>
+									{mod.name}
+								</Button>
+							{/each}
+						</div>
+
+						<ScrollArea.Root class="h-72 rounded-xl border">
+							<div class="divide-y">
+								{#each patchSummaries as patch (patch.modId + ':' + patch.patchIndex)}
+									<div class="flex flex-col gap-3 px-4 py-3 sm:flex-row sm:items-center sm:justify-between">
+										<div>
+											<p class="text-sm font-medium">{patch.title}</p>
+											<p class="text-muted-foreground text-xs">{patch.sourceGroup} / {patch.gameFile}</p>
+											<p class="text-muted-foreground text-xs">{patch.changeCount} byte changes</p>
+										</div>
+										<Button variant={patch.enabled ? 'outline' : 'secondary'} size="sm" disabled={busy.patches} onclick={() => togglePatch(patch)}>
+											{patch.enabled ? 'Disable' : 'Enable'}
+										</Button>
+									</div>
+								{:else}
+									<div class="px-4 py-8 text-sm text-muted-foreground">No patch groups found for the selected mod.</div>
+								{/each}
+							</div>
+						</ScrollArea.Root>
 					{/if}
 				</Card.Content>
 			</Card.Root>
