@@ -201,6 +201,24 @@ class ManagerState {
 		return this.applyPreview?.files.filter((file) => !file.resolved) ?? [];
 	}
 
+	modNameById(modId: string) {
+		return this.allMods.find((mod) => mod.id === modId)?.name ?? modId;
+	}
+
+	get isolationCurrentNames() {
+		return this.isolationSession?.currentTestSet.map((modId) => this.modNameById(modId)) ?? [];
+	}
+
+	get isolationSuspectNames() {
+		return this.isolationSession?.suspects.map((modId) => this.modNameById(modId)) ?? [];
+	}
+
+	get isolationResolvedName() {
+		return this.isolationSession?.resolvedModId
+			? this.modNameById(this.isolationSession.resolvedModId)
+			: null;
+	}
+
 	async ensureLoaded() {
 		if (this.dashboard || this.busy.boot) return;
 		await this.refreshDashboard();
