@@ -18,21 +18,27 @@
 	<title>ASI Mods • Crimson Desert Mod Workbench</title>
 </svelte:head>
 
-<div class="mx-auto flex min-h-full w-full max-w-5xl flex-col gap-6 px-4 py-6 sm:px-6 lg:px-8 lg:py-8">
+<div
+	class="mx-auto flex min-h-full w-full max-w-5xl flex-col gap-6 px-4 py-6 sm:px-6 lg:px-8 lg:py-8"
+>
 	<div class="space-y-2">
 		<p class="text-xs font-medium tracking-[0.24em] text-muted-foreground uppercase">ASI Mods</p>
 		<h1 class="text-3xl font-semibold tracking-tight">ASI plugins and companion files</h1>
 		<p class="max-w-3xl text-sm leading-7 text-muted-foreground">
-			Import `.asi` mods from the library, copy them into the managed external-mod directory,
-			and enable/disable/remove installed plugins. On macOS, these are managed as compatibility-style
+			Import `.asi` mods from the library, copy them into the managed external-mod directory, and
+			enable/disable/remove installed plugins. On macOS, these are managed as compatibility-style
 			external files rather than overlay content.
 		</p>
 	</div>
 
 	<Card.Root>
 		<Card.Header>
-			<Card.Title class="flex items-center gap-2"><Package class="size-5" /> Imported ASI mods</Card.Title>
-			<Card.Description>These are imported ASI sources stored in the manager library.</Card.Description>
+			<Card.Title class="flex items-center gap-2"
+				><Package class="size-5" /> Imported ASI mods</Card.Title
+			>
+			<Card.Description
+				>These are imported ASI sources stored in the manager library.</Card.Description
+			>
 		</Card.Header>
 		<Card.Content>
 			{#if manager.asiMods.length === 0}
@@ -55,8 +61,14 @@
 								</div>
 								<div class="flex flex-wrap gap-2">
 									<Badge variant="outline">ASI</Badge>
-									<Button size="sm" disabled={manager.busy.asi} onclick={() => manager.installAsiMod(mod)}>Install</Button>
-									<Button variant="destructive" size="sm" onclick={() => manager.removeMod(mod)}>Remove import</Button>
+									<Button
+										size="sm"
+										disabled={manager.busy.asi}
+										onclick={() => manager.installAsiMod(mod)}>Install</Button
+									>
+									<Button variant="destructive" size="sm" onclick={() => manager.removeMod(mod)}
+										>Remove import</Button
+									>
 								</div>
 							</div>
 						</div>
@@ -70,10 +82,19 @@
 		<Card.Header>
 			<div class="flex items-center justify-between gap-3">
 				<div>
-					<Card.Title class="flex items-center gap-2"><Package class="size-5" /> Installed ASI plugins</Card.Title>
-					<Card.Description>Scanned from the managed external-mod directory for this install.</Card.Description>
+					<Card.Title class="flex items-center gap-2"
+						><Package class="size-5" /> Installed ASI plugins</Card.Title
+					>
+					<Card.Description
+						>Scanned from the managed external-mod directory for this install.</Card.Description
+					>
 				</div>
-				<Button variant="outline" size="sm" disabled={manager.busy.asi} onclick={() => manager.refreshAsiPlugins()}>
+				<Button
+					variant="outline"
+					size="sm"
+					disabled={manager.busy.asi}
+					onclick={() => manager.refreshAsiPlugins()}
+				>
 					{manager.busy.asi ? 'Refreshing...' : 'Refresh'}
 				</Button>
 			</div>
@@ -86,14 +107,24 @@
 							<div class="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
 								<div>
 									<p class="font-medium">{plugin.name}</p>
-									<p class="text-xs text-muted-foreground break-all">{plugin.path}</p>
+									<p class="text-xs break-all text-muted-foreground">{plugin.path}</p>
 								</div>
 								<div class="flex flex-wrap gap-2">
-									<Badge variant={plugin.enabled ? 'outline' : 'secondary'}>{plugin.enabled ? 'Enabled' : 'Disabled'}</Badge>
-									<Button variant="outline" size="sm" onclick={() => manager.setAsiEnabled(plugin.name, !plugin.enabled)}>
+									<Badge variant={plugin.enabled ? 'outline' : 'secondary'}
+										>{plugin.enabled ? 'Enabled' : 'Disabled'}</Badge
+									>
+									<Button
+										variant="outline"
+										size="sm"
+										onclick={() => manager.setAsiEnabled(plugin.name, !plugin.enabled)}
+									>
 										{plugin.enabled ? 'Disable' : 'Enable'}
 									</Button>
-									<Button variant="destructive" size="sm" onclick={() => manager.removeAsiPlugin(plugin.name)}>Remove</Button>
+									<Button
+										variant="destructive"
+										size="sm"
+										onclick={() => manager.removeAsiPlugin(plugin.name)}>Remove</Button
+									>
 								</div>
 							</div>
 							{#if plugin.iniFiles.length > 0}
@@ -105,7 +136,9 @@
 							{/if}
 						</div>
 					{:else}
-						<div class="px-4 py-8 text-sm text-muted-foreground">No installed ASI plugins detected yet.</div>
+						<div class="px-4 py-8 text-sm text-muted-foreground">
+							No installed ASI plugins detected yet.
+						</div>
 					{/each}
 				</div>
 			</ScrollArea.Root>

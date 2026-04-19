@@ -127,13 +127,12 @@
 													onclick={() =>
 														manager.classifyMod(mod, 'language', fallbackKindForLanguageMod(mod))}
 													>Language</Button
-													><Button
-														variant="destructive"
-														size="sm"
-														onclick={() => manager.removeMod(mod)}
-														>Remove</Button
-													>{/if}
-												</div></Table.Cell
+												><Button
+													variant="destructive"
+													size="sm"
+													onclick={() => manager.removeMod(mod)}>Remove</Button
+												>{/if}
+										</div></Table.Cell
 									></Table.Row
 								>{/each}</Table.Body
 						></Table.Root

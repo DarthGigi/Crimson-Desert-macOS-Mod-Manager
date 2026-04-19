@@ -1,8 +1,9 @@
 <script lang="ts">
+	import { resolve } from '$app/paths';
 	import { page } from '$app/state';
-	import { HardDriveDownload } from '@lucide/svelte';
 	import * as Sidebar from '$lib/components/ui/sidebar';
 	import { appNavGroups, appSidebarMeta } from '$lib/navigation';
+	import { HardDriveDownload } from '@lucide/svelte';
 
 	const currentPath = $derived(page.url.pathname);
 </script>
@@ -13,7 +14,7 @@
 			<Sidebar.MenuItem>
 				<Sidebar.MenuButton size="lg" isActive>
 					{#snippet child({ props })}
-						<a href="/" {...props}>
+						<a href={resolve('/')} {...props}>
 							<div
 								class="flex size-9 items-center justify-center rounded-xl border border-white/10 bg-sidebar-primary text-sidebar-primary-foreground"
 							>
@@ -72,7 +73,7 @@
 			<Sidebar.MenuItem>
 				<Sidebar.MenuButton tooltipContent="Import folder">
 					{#snippet child({ props })}
-						<a href="/data-mods" {...props}>
+						<a href={resolve('/data-mods')} {...props}>
 							<HardDriveDownload />
 							<span>Import Folder</span>
 						</a>

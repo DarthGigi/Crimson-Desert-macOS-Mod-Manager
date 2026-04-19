@@ -1,15 +1,14 @@
 <script lang="ts">
-	import { onMount } from 'svelte';
-	import { open } from '@tauri-apps/plugin-dialog';
-	import { AlertCircle, Gamepad2, RefreshCw, Sparkles, Wrench } from '@lucide/svelte';
 	import * as Alert from '$lib/components/ui/alert';
+	import { Badge } from '$lib/components/ui/badge';
 	import { Button } from '$lib/components/ui/button';
 	import * as Card from '$lib/components/ui/card';
 	import { Input } from '$lib/components/ui/input';
 	import { Label } from '$lib/components/ui/label';
-	import * as Empty from '$lib/components/ui/empty';
-	import { Badge } from '$lib/components/ui/badge';
 	import { manager } from '$lib/manager-state.svelte';
+	import { AlertCircle, Gamepad2, RefreshCw, Sparkles, Wrench } from '@lucide/svelte';
+	import { open } from '@tauri-apps/plugin-dialog';
+	import { onMount } from 'svelte';
 
 	let gamePathInput = $state('');
 	let reportOutputPath = $state('');
@@ -55,19 +54,68 @@
 		</p>
 	</div>
 	<div class="grid gap-4 md:grid-cols-3">
-		<Card.Root><Card.Content class="pt-6"><p class="text-sm font-medium">Normal recovery</p><p class="mt-2 text-sm text-muted-foreground">Use `Restore vanilla overlay` or `Reset active mods` after a failed apply or when switching setups.</p></Card.Content></Card.Root>
-		<Card.Root><Card.Content class="pt-6"><p class="text-sm font-medium">Full reset</p><p class="mt-2 text-sm text-muted-foreground">Use `Fix Everything` only when the manager state looks broken or an operation was interrupted.</p></Card.Content></Card.Root>
-		<Card.Root><Card.Content class="pt-6"><p class="text-sm font-medium">Crash troubleshooting</p><p class="mt-2 text-sm text-muted-foreground">Use problem-mod isolation to narrow a crash down to a smaller test set before removing mods manually.</p></Card.Content></Card.Root>
+		<Card.Root
+			><Card.Content class="pt-6"
+				><p class="text-sm font-medium">Normal recovery</p>
+				<p class="mt-2 text-sm text-muted-foreground">
+					Use `Restore vanilla overlay` or `Reset active mods` after a failed apply or when
+					switching setups.
+				</p></Card.Content
+			></Card.Root
+		>
+		<Card.Root
+			><Card.Content class="pt-6"
+				><p class="text-sm font-medium">Full reset</p>
+				<p class="mt-2 text-sm text-muted-foreground">
+					Use `Fix Everything` only when the manager state looks broken or an operation was
+					interrupted.
+				</p></Card.Content
+			></Card.Root
+		>
+		<Card.Root
+			><Card.Content class="pt-6"
+				><p class="text-sm font-medium">Crash troubleshooting</p>
+				<p class="mt-2 text-sm text-muted-foreground">
+					Use problem-mod isolation to narrow a crash down to a smaller test set before removing
+					mods manually.
+				</p></Card.Content
+			></Card.Root
+		>
 	</div>
 	<Card.Root
 		><Card.Header
 			><Card.Title class="flex items-center gap-2"
 				><RefreshCw class="size-5" /> App updates</Card.Title
 			><Card.Description
-				>Check GitHub releases for a newer version of the app and install it automatically when available.</Card.Description
+				>Check GitHub releases for a newer version of the app and install it automatically when
+				available.</Card.Description
 			></Card.Header
 		><Card.Content class="space-y-4"
-			><div class="flex flex-wrap gap-2"><Button variant="outline" disabled={manager.busy.updater} onclick={() => manager.checkForUpdates()}>{manager.busy.updater ? 'Checking...' : 'Check for updates'}</Button>{#if manager.updateInfo?.available}<Button disabled={manager.busy.updater} onclick={() => manager.installUpdate()}>Download and install {manager.updateInfo.version}</Button>{/if}</div>{#if manager.updateInfo}<div class="rounded-xl border bg-muted/20 p-4 text-sm"><p class="font-medium">Current version: {manager.updateInfo.currentVersion}</p>{#if manager.updateInfo.available}<p class="mt-2 text-muted-foreground">Update {manager.updateInfo.version} is available.</p>{#if manager.updateInfo.body}<p class="mt-2 whitespace-pre-wrap text-sm text-muted-foreground">{manager.updateInfo.body}</p>{/if}{:else}<p class="mt-2 text-muted-foreground">No newer version is currently available.</p>{/if}</div>{/if}</Card.Content
+			><div class="flex flex-wrap gap-2">
+				<Button
+					variant="outline"
+					disabled={manager.busy.updater}
+					onclick={() => manager.checkForUpdates()}
+					>{manager.busy.updater ? 'Checking...' : 'Check for updates'}</Button
+				>{#if manager.updateInfo?.available}<Button
+						disabled={manager.busy.updater}
+						onclick={() => manager.installUpdate()}
+						>Download and install {manager.updateInfo.version}</Button
+					>{/if}
+			</div>
+			{#if manager.updateInfo}<div class="rounded-xl border bg-muted/20 p-4 text-sm">
+					<p class="font-medium">Current version: {manager.updateInfo.currentVersion}</p>
+					{#if manager.updateInfo.available}<p class="mt-2 text-muted-foreground">
+							Update {manager.updateInfo.version} is available.
+						</p>
+						{#if manager.updateInfo.body}<p
+								class="mt-2 text-sm whitespace-pre-wrap text-muted-foreground"
+							>
+								{manager.updateInfo.body}
+							</p>{/if}{:else}<p class="mt-2 text-muted-foreground">
+							No newer version is currently available.
+						</p>{/if}
+				</div>{/if}</Card.Content
 		></Card.Root
 	>
 	{#if manager.recoveryPending}<Alert.Root variant="destructive"
@@ -150,10 +198,42 @@
 			><Card.Title class="flex items-center gap-2"
 				><Sparkles class="size-5" /> Problem-mod isolation</Card.Title
 			><Card.Description
-				>Use a guided binary-search workflow to narrow down which currently enabled mod is causing a crash or bad behavior.</Card.Description
+				>Use a guided binary-search workflow to narrow down which currently enabled mod is causing a
+				crash or bad behavior.</Card.Description
 			></Card.Header
 		><Card.Content class="space-y-4"
-			>{#if !manager.isolationSession}<div class="flex flex-wrap gap-2"><Button onclick={() => manager.startProblemModIsolation()}>Start isolation</Button></div><p class="text-sm text-muted-foreground">1. Enable the mods you want to test. 2. Start isolation. 3. Launch the game and try to reproduce the problem. 4. Report whether the current test set crashed or stayed stable.</p>{:else}<div class="rounded-xl border bg-muted/20 p-4 text-sm"><p class="font-medium">Round {manager.isolationSession.rounds}</p><p class="mt-2 text-muted-foreground">Testing {manager.isolationSession.currentTestSet.length} mod(s) out of {manager.isolationSession.suspects.length} suspect(s).</p><div class="mt-3 flex flex-wrap gap-2">{#each manager.isolationCurrentNames as name (name)}<Badge variant="outline">{name}</Badge>{/each}</div>{#if manager.isolationResolvedName}<p class="mt-3 text-destructive">Likely culprit: {manager.isolationResolvedName}</p>{:else}<p class="mt-3 text-sm text-muted-foreground">Remaining suspects: {manager.isolationSuspectNames.join(', ')}</p>{/if}</div><div class="flex flex-wrap gap-2"><Button variant="destructive" onclick={() => manager.reportProblemModIsolation(true)}>This set crashed</Button><Button variant="outline" onclick={() => manager.reportProblemModIsolation(false)}>This set is stable</Button><Button variant="outline" onclick={() => manager.clearProblemModIsolation()}>Clear session</Button></div>{/if}</Card.Content
+			>{#if !manager.isolationSession}<div class="flex flex-wrap gap-2">
+					<Button onclick={() => manager.startProblemModIsolation()}>Start isolation</Button>
+				</div>
+				<p class="text-sm text-muted-foreground">
+					1. Enable the mods you want to test. 2. Start isolation. 3. Launch the game and try to
+					reproduce the problem. 4. Report whether the current test set crashed or stayed stable.
+				</p>{:else}<div class="rounded-xl border bg-muted/20 p-4 text-sm">
+					<p class="font-medium">Round {manager.isolationSession.rounds}</p>
+					<p class="mt-2 text-muted-foreground">
+						Testing {manager.isolationSession.currentTestSet.length} mod(s) out of {manager
+							.isolationSession.suspects.length} suspect(s).
+					</p>
+					<div class="mt-3 flex flex-wrap gap-2">
+						{#each manager.isolationCurrentNames as name (name)}<Badge variant="outline"
+								>{name}</Badge
+							>{/each}
+					</div>
+					{#if manager.isolationResolvedName}<p class="mt-3 text-destructive">
+							Likely culprit: {manager.isolationResolvedName}
+						</p>{:else}<p class="mt-3 text-sm text-muted-foreground">
+							Remaining suspects: {manager.isolationSuspectNames.join(', ')}
+						</p>{/if}
+				</div>
+				<div class="flex flex-wrap gap-2">
+					<Button variant="destructive" onclick={() => manager.reportProblemModIsolation(true)}
+						>This set crashed</Button
+					><Button variant="outline" onclick={() => manager.reportProblemModIsolation(false)}
+						>This set is stable</Button
+					><Button variant="outline" onclick={() => manager.clearProblemModIsolation()}
+						>Clear session</Button
+					>
+				</div>{/if}</Card.Content
 		></Card.Root
 	>
 	<Card.Root
@@ -162,7 +242,41 @@
 				>Quick health summary for the current install, overlay state, backup, and recovery markers.</Card.Description
 			></Card.Header
 		><Card.Content class="space-y-4"
-			><div class="flex flex-wrap gap-2"><Button variant="outline" onclick={() => manager.verifyGameState()}>Refresh verification</Button></div>{#if manager.gameStateReport}<div class="grid gap-3 sm:grid-cols-3"><div class="rounded-xl border bg-muted/20 p-4"><p class="text-xs uppercase tracking-[0.18em] text-muted-foreground">Metadata</p><p class="mt-2 text-sm">{manager.gameStateReport.metaExists ? '0.papgt present' : 'Missing 0.papgt'}</p></div><div class="rounded-xl border bg-muted/20 p-4"><p class="text-xs uppercase tracking-[0.18em] text-muted-foreground">Base archive</p><p class="mt-2 text-sm">{manager.gameStateReport.pamtExists ? '0008/0.pamt present' : 'Missing 0008/0.pamt'}</p></div><div class="rounded-xl border bg-muted/20 p-4"><p class="text-xs uppercase tracking-[0.18em] text-muted-foreground">Recovery</p><p class="mt-2 text-sm">{manager.gameStateReport.recoveryPending ? 'Pending recovery marker' : 'No pending recovery marker'}</p></div></div><div class="flex flex-wrap gap-2"><Badge variant="outline">{manager.gameStateReport.enabledModCount} enabled</Badge><Badge variant="outline">{manager.gameStateReport.disabledModCount} disabled</Badge><Badge variant="outline">{manager.gameStateReport.managedGroupCount} managed groups</Badge>{#if manager.gameStateReport.backupExists}<Badge variant="outline">Backup present</Badge>{/if}</div>{/if}</Card.Content
+			><div class="flex flex-wrap gap-2">
+				<Button variant="outline" onclick={() => manager.verifyGameState()}
+					>Refresh verification</Button
+				>
+			</div>
+			{#if manager.gameStateReport}<div class="grid gap-3 sm:grid-cols-3">
+					<div class="rounded-xl border bg-muted/20 p-4">
+						<p class="text-xs tracking-[0.18em] text-muted-foreground uppercase">Metadata</p>
+						<p class="mt-2 text-sm">
+							{manager.gameStateReport.metaExists ? '0.papgt present' : 'Missing 0.papgt'}
+						</p>
+					</div>
+					<div class="rounded-xl border bg-muted/20 p-4">
+						<p class="text-xs tracking-[0.18em] text-muted-foreground uppercase">Base archive</p>
+						<p class="mt-2 text-sm">
+							{manager.gameStateReport.pamtExists ? '0008/0.pamt present' : 'Missing 0008/0.pamt'}
+						</p>
+					</div>
+					<div class="rounded-xl border bg-muted/20 p-4">
+						<p class="text-xs tracking-[0.18em] text-muted-foreground uppercase">Recovery</p>
+						<p class="mt-2 text-sm">
+							{manager.gameStateReport.recoveryPending
+								? 'Pending recovery marker'
+								: 'No pending recovery marker'}
+						</p>
+					</div>
+				</div>
+				<div class="flex flex-wrap gap-2">
+					<Badge variant="outline">{manager.gameStateReport.enabledModCount} enabled</Badge><Badge
+						variant="outline">{manager.gameStateReport.disabledModCount} disabled</Badge
+					><Badge variant="outline"
+						>{manager.gameStateReport.managedGroupCount} managed groups</Badge
+					>{#if manager.gameStateReport.backupExists}<Badge variant="outline">Backup present</Badge
+						>{/if}
+				</div>{/if}</Card.Content
 		></Card.Root
 	>
 	<Card.Root
@@ -171,7 +285,23 @@
 				>Export a JSON report containing dashboard state, history, and any active isolation session.</Card.Description
 			></Card.Header
 		><Card.Content class="space-y-4"
-			><div class="space-y-2"><Label for="report-output">Report output path</Label><div class="flex flex-wrap gap-2"><Input id="report-output" bind:value={reportOutputPath} placeholder="Choose where to save the diagnostic report" /><Button variant="outline" onclick={chooseReportOutput}>Browse</Button><Button disabled={!reportOutputPath.trim()} onclick={() => manager.exportDiagnosticReport(reportOutputPath)}>Export report</Button></div></div><p class="text-sm text-muted-foreground">The exported report includes dashboard state, recent history, and any active isolation session.</p></Card.Content
+			><div class="space-y-2">
+				<Label for="report-output">Report output path</Label>
+				<div class="flex flex-wrap gap-2">
+					<Input
+						id="report-output"
+						bind:value={reportOutputPath}
+						placeholder="Choose where to save the diagnostic report"
+					/><Button variant="outline" onclick={chooseReportOutput}>Browse</Button><Button
+						disabled={!reportOutputPath.trim()}
+						onclick={() => manager.exportDiagnosticReport(reportOutputPath)}>Export report</Button
+					>
+				</div>
+			</div>
+			<p class="text-sm text-muted-foreground">
+				The exported report includes dashboard state, recent history, and any active isolation
+				session.
+			</p></Card.Content
 		></Card.Root
 	>
 </div>

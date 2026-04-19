@@ -15,10 +15,7 @@ tauriConf.version = version;
 fs.writeFileSync(tauriConfPath, `${JSON.stringify(tauriConf, null, 2)}\n`);
 
 const cargoToml = fs.readFileSync(cargoTomlPath, 'utf8');
-const nextCargoToml = cargoToml.replace(
-	/^version = ".*"$/m,
-	`version = "${version}"`
-);
+const nextCargoToml = cargoToml.replace(/^version = ".*"$/m, `version = "${version}"`);
 
 if (nextCargoToml === cargoToml) {
 	throw new Error('Failed to sync version in src-tauri/Cargo.toml');

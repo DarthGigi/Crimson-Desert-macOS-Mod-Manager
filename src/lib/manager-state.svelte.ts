@@ -1,38 +1,59 @@
 import { goto } from '$app/navigation';
-import { toast } from 'svelte-sonner';
+import { resolve } from '$app/paths';
 import {
+	applyBinaryPatch,
 	applyMods,
+	applyProfile,
+	checkForUpdates,
+	clearProblemModIsolation,
+	createProfile,
+	deleteProfile,
 	detectGameInstall,
+	exportDiagnosticReport,
+	extractVirtualFile,
+	extractXmlEntry,
+	fixEverything,
 	getApplyPreview,
 	getAsiPlugins,
 	getBnkFiles,
 	getDashboard,
-	checkForUpdates,
-	exportDiagnosticReport,
 	getHistory,
-	getProfiles,
-	getProblemModIsolation,
 	getModPatchSummaries,
 	getPathcSummary,
-	extractXmlEntry,
-	searchVirtualFiles,
+	getProblemModIsolation,
+	getProfiles,
 	getVirtualFilePreview,
 	importModVariant,
 	installAsiMod,
 	installBnkMod,
 	installScriptMod,
-	applyBinaryPatch,
-	runScriptInstaller,
 	launchGame,
 	moveModInLoadOrder,
-	removeMod,
+	removeAsiPlugin,
 	removeBnkFile,
+	removeMod,
+	repackPathc,
+	repackXmlEntry,
+	reportProblemModIsolation,
+	resetActiveMods,
+	restoreVanilla,
+	runScriptInstaller,
+	saveProfile,
+	scanModFolder,
+	searchVirtualFiles,
+	setAsiEnabled,
+	setGameInstall,
+	setModClassification,
+	setModEnabled,
+	setPatchEnabled,
+	setSelectedLanguage,
+	startProblemModIsolation,
+	verifyGameState,
 	type ApplyPreview,
 	type ApplyResult,
 	type AsiPluginInfo,
 	type DashboardData,
-	type UpdateInfo,
-    type ExternalFileInfo,
+	type ExternalFileInfo,
 	type ExtractPreview,
 	type ExtractResult,
 	type HistoryEntry,
@@ -44,33 +65,13 @@ import {
 	type PathcRepackResult,
 	type PathcSummary,
 	type ScanResult,
-	type VirtualFileMatch,
+	type UpdateInfo,
 	type VerifyGameStateResult,
+	type VirtualFileMatch,
 	type XmlPreview,
-	type XmlRepackResult,
-	applyProfile,
-	clearProblemModIsolation,
-	createProfile,
-	deleteProfile,
-	fixEverything,
-	repackPathc,
-	resetActiveMods,
-	restoreVanilla,
-	scanModFolder,
-	startProblemModIsolation,
-	reportProblemModIsolation,
-	setModClassification,
-	setGameInstall,
-	setPatchEnabled,
-	setSelectedLanguage,
-	setModEnabled,
-	extractVirtualFile,
-	repackXmlEntry,
-	removeAsiPlugin,
-	saveProfile,
-	setAsiEnabled,
-	verifyGameState
+	type XmlRepackResult
 } from '$lib/desktop-api';
+import { toast } from 'svelte-sonner';
 
 export type ManagerMessage = {
 	kind: 'error' | 'success' | 'info';
@@ -508,7 +509,12 @@ class ManagerState {
 		}
 
 		if (lastError) {
-			this.setError(lastError, importedCount > 0 ? `Imported ${importedCount} mods before an error occurred` : 'Could not batch import mods');
+			this.setError(
+				lastError,
+				importedCount > 0
+					? `Imported ${importedCount} mods before an error occurred`
+					: 'Could not batch import mods'
+			);
 			return;
 		}
 
@@ -707,7 +713,7 @@ class ManagerState {
 			this.lastApplyResult = await applyMods();
 			await this.refreshDashboard();
 			toast.success(this.lastApplyResult.message);
-			await goto('/apply-logs');
+			await goto(resolve('/apply-logs'));
 		} catch (error) {
 			this.setError(error, 'Could not apply the enabled mods');
 		} finally {
@@ -816,7 +822,9 @@ class ManagerState {
 		try {
 			this.dashboard = await startProblemModIsolation();
 			await Promise.all([this.refreshIsolationSession(), this.refreshHistory()]);
-			toast.success('Started problem-mod isolation. Test the current mod set and report the result.');
+			toast.success(
+				'Started problem-mod isolation. Test the current mod set and report the result.'
+			);
 		} catch (error) {
 			this.setError(error, 'Could not start problem-mod isolation');
 		}
@@ -827,7 +835,11 @@ class ManagerState {
 		try {
 			this.dashboard = await reportProblemModIsolation(crashed);
 			await Promise.all([this.refreshIsolationSession(), this.refreshHistory()]);
-			toast.success(crashed ? 'Marked the current test set as crashing.' : 'Marked the current test set as stable.');
+			toast.success(
+				crashed
+					? 'Marked the current test set as crashing.'
+					: 'Marked the current test set as stable.'
+			);
 		} catch (error) {
 			this.setError(error, 'Could not update problem-mod isolation');
 		}
