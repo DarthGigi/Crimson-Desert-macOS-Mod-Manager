@@ -9,14 +9,20 @@ export type GameInstallInfo = {
 	detected: boolean;
 };
 
+export type ModKind = 'json_data' | 'precompiled_overlay' | 'language';
+
 export type ModRecord = {
 	id: string;
+	modKind: ModKind;
 	name: string;
 	description: string | null;
 	fileName: string;
 	sourcePath: string | null;
 	libraryPath: string;
 	enabled: boolean;
+	loadOrder: number;
+	language: string | null;
+	installGroup: string | null;
 	patchCount: number;
 	changeCount: number;
 	targetFiles: string[];
@@ -26,6 +32,7 @@ export type ModRecord = {
 
 export type ScanResult = {
 	path: string;
+	modKind: ModKind;
 	fileName: string;
 	name: string;
 	description: string | null;
@@ -38,9 +45,11 @@ export type ScanResult = {
 
 export type ApplyFileResult = {
 	gameFile: string;
+	sourceGroup: string;
 	sourcePazIndex: number;
 	appliedChanges: number;
 	skippedChanges: number;
+	overlapCount: number;
 	reason: string | null;
 };
 
@@ -50,12 +59,14 @@ export type ApplyResult = {
 	overlayFileCount: number;
 	pazSize: number;
 	pamtSize: number;
+	createdGroups: string[];
 	files: ApplyFileResult[];
 	message: string;
 };
 
 export type StatusSummary = {
 	gameInstall: GameInstallInfo | null;
+	selectedLanguage: string | null;
 	overlayActive: boolean;
 	backupExists: boolean;
 	totalMods: number;
@@ -96,6 +107,14 @@ export async function importModVariant(path: string, enable = true) {
 
 export async function setModEnabled(modId: string, enabled: boolean) {
 	return invoke<DashboardData>('set_mod_enabled_command', { modId, enabled });
+}
+
+export async function setSelectedLanguage(language: string | null) {
+	return invoke<DashboardData>('set_selected_language_command', { language });
+}
+
+export async function setModClassification(modId: string, modKind: ModKind, language: string | null) {
+	return invoke<DashboardData>('set_mod_classification_command', { modId, modKind, language });
 }
 
 export async function applyMods() {

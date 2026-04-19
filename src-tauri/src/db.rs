@@ -256,6 +256,26 @@ pub fn update_mod_enabled(connection: &Connection, mod_id: &str, enabled: bool) 
     Ok(())
 }
 
+pub fn update_mod_classification(
+    connection: &Connection,
+    mod_id: &str,
+    mod_kind: ModKind,
+    language: Option<&str>,
+) -> AppResult<()> {
+    let updated = connection.execute(
+        "UPDATE mods
+         SET mod_kind = ?2, language = ?3, updated_at = ?4
+         WHERE id = ?1",
+        params![mod_id, mod_kind.as_str(), language, now_iso_string()],
+    )?;
+
+    if updated == 0 {
+        return Err(AppError::NotFound(format!("No mod found for id {mod_id}")));
+    }
+
+    Ok(())
+}
+
 pub fn disable_all_mods(connection: &Connection) -> AppResult<()> {
     connection.execute(
         "UPDATE mods SET enabled = 0, updated_at = ?1 WHERE enabled = 1",

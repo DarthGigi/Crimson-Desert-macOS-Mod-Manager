@@ -143,6 +143,7 @@ pub struct ManagedGroupRecord {
 #[serde(rename_all = "camelCase")]
 pub struct StatusSummary {
     pub game_install: Option<GameInstallInfo>,
+    pub selected_language: Option<String>,
     pub overlay_active: bool,
     pub backup_exists: bool,
     pub total_mods: usize,

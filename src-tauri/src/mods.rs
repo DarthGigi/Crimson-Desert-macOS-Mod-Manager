@@ -235,11 +235,24 @@ pub fn load_manifest(path: &Path) -> AppResult<ModManifest> {
     })
 }
 
-pub fn load_enabled_manifests(records: &[ModRecord]) -> AppResult<Vec<(ModRecord, ModManifest)>> {
+pub fn load_enabled_manifests(
+    records: &[ModRecord],
+    selected_language: Option<&str>,
+) -> AppResult<Vec<(ModRecord, ModManifest)>> {
     let mut mods = Vec::new();
     for record in records
         .iter()
-        .filter(|record| record.enabled && record.mod_kind == ModKind::JsonData)
+        .filter(|record| {
+            record.enabled
+                && match record.mod_kind {
+                    ModKind::JsonData => true,
+                    ModKind::Language => {
+                        record.language.as_deref() == selected_language
+                            && Path::new(&record.library_path).is_file()
+                    }
+                    ModKind::PrecompiledOverlay => false,
+                }
+        })
     {
         let manifest = load_manifest(Path::new(&record.library_path))?;
         mods.push((record.clone(), manifest));

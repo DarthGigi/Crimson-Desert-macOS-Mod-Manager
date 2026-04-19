@@ -293,11 +293,22 @@ pub fn apply_mods(
     game_dir: &Path,
     records: &[ModRecord],
     managed_groups: &[ManagedGroupRecord],
+    selected_language: Option<&str>,
 ) -> AppResult<ApplyResult> {
-    let enabled_manifests = load_enabled_manifests(records)?;
+    let enabled_manifests = load_enabled_manifests(records, selected_language)?;
     let enabled_precompiled: Vec<ModRecord> = records
         .iter()
-        .filter(|record| record.enabled && record.mod_kind == crate::models::ModKind::PrecompiledOverlay)
+        .filter(|record| {
+            let is_dir_backed = Path::new(&record.library_path).is_dir();
+            record.enabled
+                && match record.mod_kind {
+                    crate::models::ModKind::PrecompiledOverlay => is_dir_backed,
+                    crate::models::ModKind::Language => {
+                        is_dir_backed && record.language.as_deref() == selected_language
+                    }
+                    crate::models::ModKind::JsonData => false,
+                }
+        })
         .cloned()
         .collect();
 

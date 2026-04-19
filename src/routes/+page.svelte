@@ -28,10 +28,13 @@
 		resetActiveMods,
 		restoreVanilla,
 		scanModFolder,
+		setModClassification,
 		setGameInstall,
+		setSelectedLanguage,
 		setModEnabled,
 		type ApplyResult,
 		type DashboardData,
+		type ModKind,
 		type ModRecord,
 		type ScanResult
 	} from '$lib/desktop-api';
@@ -98,6 +101,10 @@
 			return matchesFilter && matchesSearch;
 		});
 	});
+	const selectedLanguage = $derived(dashboard?.status.selectedLanguage ?? null);
+	const languageMods = $derived(allMods.filter((mod) => mod.modKind === 'language'));
+	const precompiledMods = $derived(allMods.filter((mod) => mod.modKind === 'precompiled_overlay'));
+	const languageOptions = ['eng', 'jpn', 'kor', 'rus', 'tur', 'spa_es', 'spa_mx', 'fre', 'ger', 'ita', 'pol', 'por_br', 'zho_tw', 'zho_cn'];
 
 	onMount(() => {
 		void refreshDashboard();
@@ -298,6 +305,41 @@
 		}
 	}
 
+	async function chooseLanguage(language: string | null) {
+		clearMessage();
+		try {
+			dashboard = await setSelectedLanguage(language);
+			toast.success(language ? `Selected ${language.toUpperCase()} for language overlays.` : 'Cleared the selected language.');
+		} catch (error) {
+			setError(error, 'Could not update the selected language');
+		}
+	}
+
+	async function classifyMod(mod: ModRecord, modKind: ModKind) {
+		clearMessage();
+		if (modKind === 'language' && !selectedLanguage) {
+			toast.info('Choose the current in-game language first.');
+			return;
+		}
+
+		try {
+			dashboard = await setModClassification(mod.id, modKind, modKind === 'language' ? selectedLanguage : null);
+			toast.success(`${mod.name} is now classified as ${modKind.replace('_', ' ')}.`);
+		} catch (error) {
+			setError(error, `Could not update ${mod.name}`);
+		}
+	}
+
+	function modKindLabel(modKind: ModKind) {
+		if (modKind === 'json_data') return 'JSON';
+		if (modKind === 'precompiled_overlay') return 'Precompiled';
+		return 'Language';
+	}
+
+	function fallbackKindForLanguageMod(mod: ModRecord): ModKind {
+		return mod.targetFiles.every((target) => /^\d{4}$/.test(target)) ? 'precompiled_overlay' : 'json_data';
+	}
+
 	function clearMessage() {
 		message = null;
 	}
@@ -416,6 +458,7 @@
 												<p class="font-medium">{result.name}</p>
 												<p class="text-muted-foreground text-sm">{result.fileName}</p>
 												<div class="flex flex-wrap gap-2">
+													<Badge variant="secondary">{modKindLabel(result.modKind)}</Badge>
 													<Badge variant="outline">{result.patchCount} patch groups</Badge>
 													<Badge variant="outline">{result.changeCount} byte changes</Badge>
 													<Badge variant={result.missingFiles.length === 0 ? 'default' : 'secondary'}>
@@ -485,9 +528,46 @@
 				<Card.Header>
 					<Card.Title class="flex items-center gap-2"><Globe2 class="size-5" /> Planned language lane</Card.Title>
 					<Card.Description>
-						Language mods will be separated from data mods and targeted to the selected in-game language rather than the generic data-mod flow.
+						Language mods are now tied to a selected in-game language. Only language-classified mods that match this selection are installed on apply.
 					</Card.Description>
 				</Card.Header>
+				<Card.Content class="space-y-4">
+					<div class="flex flex-wrap gap-2">
+						<Button variant={selectedLanguage === null ? 'default' : 'outline'} size="sm" onclick={() => chooseLanguage(null)}>None</Button>
+						{#each languageOptions as language (language)}
+							<Button variant={selectedLanguage === language ? 'default' : 'outline'} size="sm" onclick={() => chooseLanguage(language)}>
+								{language.toUpperCase()}
+							</Button>
+						{/each}
+					</div>
+					<p class="text-muted-foreground text-sm">Selected language: <span class="text-foreground font-medium">{selectedLanguage?.toUpperCase() ?? 'Not set'}</span></p>
+
+					{#if languageMods.length === 0}
+						<Empty.Root class="min-h-36 border-dashed bg-muted/20 p-8">
+							<Empty.Header>
+								<Empty.Title>No language mods yet</Empty.Title>
+								<Empty.Description>Classify imported JSON or precompiled mods as language mods once you know the target language.</Empty.Description>
+							</Empty.Header>
+						</Empty.Root>
+					{:else}
+						<div class="space-y-3">
+							{#each languageMods as mod (mod.id)}
+								<div class="rounded-xl border bg-muted/20 px-4 py-4">
+									<div class="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+										<div>
+											<p class="font-medium">{mod.name}</p>
+											<p class="text-muted-foreground text-sm">{mod.fileName}</p>
+										</div>
+										<div class="flex flex-wrap gap-2">
+											<Badge>{mod.language?.toUpperCase() ?? 'Unassigned'}</Badge>
+											<Badge variant="outline">{modKindLabel(mod.modKind)}</Badge>
+										</div>
+									</div>
+								</div>
+							{/each}
+						</div>
+					{/if}
+				</Card.Content>
 			</Card.Root>
 		</section>
 
@@ -500,9 +580,36 @@
 				<Card.Header>
 					<Card.Title class="flex items-center gap-2"><Package class="size-5" /> Planned precompiled support</Card.Title>
 					<Card.Description>
-						This lane will handle mods that already ship numeric folders and `meta`, separate from JSON compilation.
+						Precompiled overlays with numeric group folders now import and install into fresh manager-owned groups during apply.
 					</Card.Description>
 				</Card.Header>
+				<Card.Content>
+					{#if precompiledMods.length === 0}
+						<Empty.Root class="min-h-32 border-dashed bg-muted/20 p-8">
+							<Empty.Header>
+								<Empty.Title>No precompiled overlays imported</Empty.Title>
+								<Empty.Description>Imported numeric-group mods will appear here once scanned from folder packages like `item_price_display`.</Empty.Description>
+							</Empty.Header>
+						</Empty.Root>
+					{:else}
+						<div class="space-y-3">
+							{#each precompiledMods as mod (mod.id)}
+								<div class="rounded-xl border bg-muted/20 px-4 py-4">
+									<div class="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+										<div>
+											<p class="font-medium">{mod.name}</p>
+											<p class="text-muted-foreground text-sm">{mod.fileName}</p>
+										</div>
+										<div class="flex flex-wrap gap-2">
+											<Badge variant="outline">{mod.targetFiles.length} source groups</Badge>
+											<Button variant="outline" size="sm" onclick={() => classifyMod(mod, 'language')}>Use as language</Button>
+										</div>
+									</div>
+								</div>
+							{/each}
+						</div>
+					{/if}
+				</Card.Content>
 			</Card.Root>
 		</section>
 
@@ -550,7 +657,11 @@
 												<div class="space-y-2">
 													<div class="flex flex-wrap items-center gap-2">
 														<p class="font-medium">{mod.name}</p>
+														<Badge variant="outline">{modKindLabel(mod.modKind)}</Badge>
 														<Badge variant={mod.enabled ? 'default' : 'secondary'}>{mod.enabled ? 'Enabled' : 'Archived'}</Badge>
+														{#if mod.language}
+															<Badge>{mod.language.toUpperCase()}</Badge>
+														{/if}
 													</div>
 													<p class="text-muted-foreground text-sm">{mod.fileName}</p>
 													{#if mod.description}
@@ -570,9 +681,16 @@
 											</Table.Cell>
 											<Table.Cell class="text-muted-foreground align-top text-sm">{formatTimestamp(mod.importedAt)}</Table.Cell>
 											<Table.Cell class="align-top text-right">
-												<Button variant={mod.enabled ? 'outline' : 'default'} size="sm" disabled={busy.toggling === mod.id} onclick={() => toggleMod(mod)}>
-													{modActionLabel(mod)}
-												</Button>
+												<div class="flex justify-end gap-2">
+													<Button variant={mod.enabled ? 'outline' : 'default'} size="sm" disabled={busy.toggling === mod.id} onclick={() => toggleMod(mod)}>
+														{modActionLabel(mod)}
+													</Button>
+													{#if mod.modKind === 'language'}
+														<Button variant="outline" size="sm" onclick={() => classifyMod(mod, fallbackKindForLanguageMod(mod))}>Unset language</Button>
+													{:else}
+														<Button variant="outline" size="sm" onclick={() => classifyMod(mod, 'language')}>Language</Button>
+													{/if}
+												</div>
 											</Table.Cell>
 										</Table.Row>
 									{/each}

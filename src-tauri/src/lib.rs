@@ -11,16 +11,17 @@ use std::sync::Mutex;
 
 use db::{
     clear_managed_groups, connect, get_setting, insert_history, list_managed_groups, list_mods,
-    replace_managed_groups, set_setting, update_mod_enabled,
+    replace_managed_groups, set_setting, update_mod_classification, update_mod_enabled,
 };
 use error::{AppError, ErrorPayload};
 use game::{
     detect_packages_dir, inspect_game_install, launch_game, resolve_to_packages_dir, LaunchResult,
 };
-use models::{ApplyResult, DashboardData, GameInstallInfo, ModRecord, ScanResult, StatusSummary};
+use models::{ApplyResult, DashboardData, GameInstallInfo, ModKind, ModRecord, ScanResult, StatusSummary};
 use tauri::{AppHandle, Manager, State};
 
 const SETTINGS_GAME_PATH: &str = "game_packages_path";
+const SETTINGS_GAME_LANGUAGE: &str = "selected_game_language";
 
 struct AppState {
     app_data_dir: PathBuf,
@@ -60,6 +61,8 @@ fn current_game_install(
 fn build_dashboard(connection: &rusqlite::Connection) -> Result<DashboardData, AppError> {
     let mods = list_mods(connection)?;
     let managed_groups = list_managed_groups(connection)?;
+    let selected_language = get_setting(connection, SETTINGS_GAME_LANGUAGE)?
+        .filter(|value| !value.is_empty());
     let enabled: Vec<ModRecord> = mods
         .iter()
         .filter(|record| record.enabled)
@@ -88,6 +91,7 @@ fn build_dashboard(connection: &rusqlite::Connection) -> Result<DashboardData, A
     Ok(DashboardData {
         status: StatusSummary {
             game_install,
+            selected_language,
             overlay_active,
             backup_exists,
             total_mods: mods.len(),
@@ -197,6 +201,47 @@ fn set_mod_enabled_command(
 }
 
 #[tauri::command]
+fn set_selected_language_command(
+    language: Option<String>,
+    state: State<'_, AppState>,
+) -> Result<DashboardData, ErrorPayload> {
+    let connection = state.connection().map_err(ErrorPayload::from)?;
+    set_setting(
+        &connection,
+        SETTINGS_GAME_LANGUAGE,
+        language.as_deref().unwrap_or(""),
+    )
+    .map_err(ErrorPayload::from)?;
+    build_dashboard(&connection).map_err(ErrorPayload::from)
+}
+
+#[tauri::command]
+fn set_mod_classification_command(
+    mod_id: String,
+    mod_kind: ModKind,
+    language: Option<String>,
+    state: State<'_, AppState>,
+) -> Result<DashboardData, ErrorPayload> {
+    let connection = state.connection().map_err(ErrorPayload::from)?;
+    let normalized_language = if mod_kind == ModKind::Language {
+        language.filter(|value| !value.trim().is_empty())
+    } else {
+        None
+    };
+    update_mod_classification(&connection, &mod_id, mod_kind, normalized_language.as_deref())
+        .map_err(ErrorPayload::from)?;
+    insert_history(
+        &connection,
+        "classify",
+        "ok",
+        &format!("Updated classification for mod {mod_id}"),
+        None,
+    )
+    .map_err(ErrorPayload::from)?;
+    build_dashboard(&connection).map_err(ErrorPayload::from)
+}
+
+#[tauri::command]
 fn apply_mods_command(state: State<'_, AppState>) -> Result<ApplyResult, ErrorPayload> {
     let _guard = state.operation_lock.lock().map_err(|_| ErrorPayload {
         message: "Operation lock poisoned".to_string(),
@@ -209,7 +254,11 @@ fn apply_mods_command(state: State<'_, AppState>) -> Result<ApplyResult, ErrorPa
         })?;
     let mods = list_mods(&connection).map_err(ErrorPayload::from)?;
     let managed_groups = list_managed_groups(&connection).map_err(ErrorPayload::from)?;
-    let result = patcher::apply_mods(&packages_dir, &mods, &managed_groups).map_err(ErrorPayload::from)?;
+    let selected_language = get_setting(&connection, SETTINGS_GAME_LANGUAGE)
+        .map_err(ErrorPayload::from)?
+        .filter(|value| !value.is_empty());
+    let result = patcher::apply_mods(&packages_dir, &mods, &managed_groups, selected_language.as_deref())
+        .map_err(ErrorPayload::from)?;
     let replacement_groups = patcher::managed_group_records(&result.created_groups, "json_overlay");
     replace_managed_groups(&mut connection, &replacement_groups).map_err(ErrorPayload::from)?;
     insert_history(&connection, "apply", "ok", &result.message, None)
@@ -295,6 +344,8 @@ pub fn run() {
             scan_mod_folder_command,
             import_mod_variant_command,
             set_mod_enabled_command,
+            set_selected_language_command,
+            set_mod_classification_command,
             apply_mods_command,
             restore_vanilla_command,
             reset_active_mods_command,
