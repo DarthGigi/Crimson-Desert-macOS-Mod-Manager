@@ -4,6 +4,7 @@
 
 ### dotenv ###
 .env
+.keys/
 
 ### Linux ###
 *~

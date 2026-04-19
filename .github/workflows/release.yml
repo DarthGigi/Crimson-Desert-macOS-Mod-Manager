@@ -60,6 +60,11 @@ jobs:
       - name: Ensure bundled 7z is executable
         run: chmod +x src-tauri/binaries/7z
 
+      - name: Set updater signing env
+        run: |
+          echo "TAURI_SIGNING_PRIVATE_KEY=${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}" >> "$GITHUB_ENV"
+          echo "TAURI_SIGNING_PRIVATE_KEY_PASSWORD=${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}" >> "$GITHUB_ENV"
+
       - name: Build Tauri bundles
         run: pnpm tauri build --bundles app,dmg --target ${{ matrix.target }}
 
@@ -76,8 +81,16 @@ jobs:
         run: |
           APP_PATH=$(find src-tauri/target/${{ matrix.target }}/release/bundle/macos -maxdepth 1 -name '*.app' -print -quit)
           DMG_PATH=$(find src-tauri/target/${{ matrix.target }}/release/bundle/dmg -maxdepth 1 -name '*.dmg' -print -quit)
+          LATEST_JSON=$(find src-tauri/target/${{ matrix.target }}/release/bundle -name 'latest.json' -print -quit)
+          UPDATER_ARTIFACTS=$(find src-tauri/target/${{ matrix.target }}/release/bundle -type f \( -name '*.tar.gz' -o -name '*.tar.gz.sig' \) -print)
           echo "app_path=$APP_PATH" >> "$GITHUB_OUTPUT"
           echo "dmg_path=$DMG_PATH" >> "$GITHUB_OUTPUT"
+          echo "latest_json=$LATEST_JSON" >> "$GITHUB_OUTPUT"
+          {
+            echo 'updater_artifacts<<EOF'
+            echo "$UPDATER_ARTIFACTS"
+            echo EOF
+          } >> "$GITHUB_OUTPUT"
 
       - name: Upload app artifact
         uses: actions/upload-artifact@v4
@@ -91,6 +104,15 @@ jobs:
           name: Crimson-Desert-Mod-Manager-${{ matrix.arch }}-dmg
           path: ${{ steps.bundle_paths.outputs.dmg_path }}
 
+      - name: Upload updater metadata
+        if: steps.bundle_paths.outputs.latest_json != ''
+        uses: actions/upload-artifact@v4
+        with:
+          name: Crimson-Desert-Mod-Manager-${{ matrix.arch }}-updater
+          path: |
+            ${{ steps.bundle_paths.outputs.latest_json }}
+            ${{ steps.bundle_paths.outputs.updater_artifacts }}
+
       - name: Attest app artifact
         uses: actions/attest@v4
         with:
@@ -101,6 +123,14 @@ jobs:
         with:
           subject-path: ${{ steps.bundle_paths.outputs.dmg_path }}
 
+      - name: Attest updater artifacts
+        if: steps.bundle_paths.outputs.latest_json != ''
+        uses: actions/attest@v4
+        with:
+          subject-path: |
+            ${{ steps.bundle_paths.outputs.latest_json }}
+            ${{ steps.bundle_paths.outputs.updater_artifacts }}
+
       - name: Publish release assets
         uses: softprops/action-gh-release@v2
         with:
@@ -109,6 +139,8 @@ jobs:
           files: |
             ${{ steps.bundle_paths.outputs.app_path }}
             ${{ steps.bundle_paths.outputs.dmg_path }}
+            ${{ steps.bundle_paths.outputs.latest_json }}
+            ${{ steps.bundle_paths.outputs.updater_artifacts }}
           draft: true
           prerelease: false
           generate_release_notes: true

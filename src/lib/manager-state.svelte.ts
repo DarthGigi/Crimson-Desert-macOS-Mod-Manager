@@ -7,6 +7,7 @@ import {
 	getAsiPlugins,
 	getBnkFiles,
 	getDashboard,
+	checkForUpdates,
 	exportDiagnosticReport,
 	getHistory,
 	getProfiles,
@@ -30,6 +31,7 @@ import {
 	type ApplyResult,
 	type AsiPluginInfo,
 	type DashboardData,
+	type UpdateInfo,
     type ExternalFileInfo,
 	type ExtractPreview,
 	type ExtractResult,
@@ -91,6 +93,7 @@ class ManagerState {
 	profiles = $state<ModProfile[]>([]);
 	isolationSession = $state<IsolationSession | null>(null);
 	gameStateReport = $state<VerifyGameStateResult | null>(null);
+	updateInfo = $state<UpdateInfo | null>(null);
 	virtualFileMatches = $state<VirtualFileMatch[]>([]);
 	patchSummaries = $state<ModPatchSummary[]>([]);
 	scanResults = $state<ScanResult[]>([]);
@@ -118,6 +121,7 @@ class ManagerState {
 		xml: false,
 		asi: false,
 		external: false,
+		updater: false,
 		toggling: ''
 	});
 
@@ -848,6 +852,33 @@ class ManagerState {
 			toast.success(`Exported diagnostic report to ${path}.`);
 		} catch (error) {
 			this.setError(error, 'Could not export diagnostic report');
+		}
+	}
+
+	async checkForUpdates() {
+		this.busy.updater = true;
+		try {
+			this.updateInfo = await checkForUpdates();
+			if (this.updateInfo.available) {
+				toast.success(`Update ${this.updateInfo.version} is available.`);
+			} else {
+				toast.message('No update available.');
+			}
+		} catch (error) {
+			this.setError(error, 'Could not check for updates');
+		} finally {
+			this.busy.updater = false;
+		}
+	}
+
+	async installUpdate() {
+		this.busy.updater = true;
+		try {
+			await (await import('$lib/desktop-api')).installAvailableUpdate();
+		} catch (error) {
+			this.setError(error, 'Could not install the update');
+		} finally {
+			this.busy.updater = false;
 		}
 	}
 

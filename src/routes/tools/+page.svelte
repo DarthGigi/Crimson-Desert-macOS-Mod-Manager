@@ -1,7 +1,7 @@
 <script lang="ts">
 	import { onMount } from 'svelte';
 	import { open } from '@tauri-apps/plugin-dialog';
-	import { AlertCircle, Gamepad2, Sparkles, Wrench } from '@lucide/svelte';
+	import { AlertCircle, Gamepad2, RefreshCw, Sparkles, Wrench } from '@lucide/svelte';
 	import * as Alert from '$lib/components/ui/alert';
 	import { Button } from '$lib/components/ui/button';
 	import * as Card from '$lib/components/ui/card';
@@ -59,6 +59,17 @@
 		<Card.Root><Card.Content class="pt-6"><p class="text-sm font-medium">Full reset</p><p class="mt-2 text-sm text-muted-foreground">Use `Fix Everything` only when the manager state looks broken or an operation was interrupted.</p></Card.Content></Card.Root>
 		<Card.Root><Card.Content class="pt-6"><p class="text-sm font-medium">Crash troubleshooting</p><p class="mt-2 text-sm text-muted-foreground">Use problem-mod isolation to narrow a crash down to a smaller test set before removing mods manually.</p></Card.Content></Card.Root>
 	</div>
+	<Card.Root
+		><Card.Header
+			><Card.Title class="flex items-center gap-2"
+				><RefreshCw class="size-5" /> App updates</Card.Title
+			><Card.Description
+				>Check GitHub releases for a newer version of the app and install it automatically when available.</Card.Description
+			></Card.Header
+		><Card.Content class="space-y-4"
+			><div class="flex flex-wrap gap-2"><Button variant="outline" disabled={manager.busy.updater} onclick={() => manager.checkForUpdates()}>{manager.busy.updater ? 'Checking...' : 'Check for updates'}</Button>{#if manager.updateInfo?.available}<Button disabled={manager.busy.updater} onclick={() => manager.installUpdate()}>Download and install {manager.updateInfo.version}</Button>{/if}</div>{#if manager.updateInfo}<div class="rounded-xl border bg-muted/20 p-4 text-sm"><p class="font-medium">Current version: {manager.updateInfo.currentVersion}</p>{#if manager.updateInfo.available}<p class="mt-2 text-muted-foreground">Update {manager.updateInfo.version} is available.</p>{#if manager.updateInfo.body}<p class="mt-2 whitespace-pre-wrap text-sm text-muted-foreground">{manager.updateInfo.body}</p>{/if}{:else}<p class="mt-2 text-muted-foreground">No newer version is currently available.</p>{/if}</div>{/if}</Card.Content
+		></Card.Root
+	>
 	{#if manager.recoveryPending}<Alert.Root variant="destructive"
 			><AlertCircle class="size-4" /><Alert.Title>Recovery recommended</Alert.Title
 			><Alert.Description

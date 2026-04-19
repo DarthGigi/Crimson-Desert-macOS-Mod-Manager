@@ -28,3 +28,5 @@ tauri-plugin-dialog = "2.7.0"
 zip = { version = "2.2.2", default-features = false, features = ["deflate"] }
 chacha20 = { version = "0.10.0", features = ["legacy"] }
 fix-path-env = { git = "https://github.com/tauri-apps/fix-path-env-rs", version = "0.0.0" }
+tauri-plugin-updater = "2.10.1"
+tauri-plugin-process = "2.3.1"

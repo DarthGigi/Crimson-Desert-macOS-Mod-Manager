@@ -1,4 +1,6 @@
 import { invoke } from '@tauri-apps/api/core';
+import { relaunch } from '@tauri-apps/plugin-process';
+import { check } from '@tauri-apps/plugin-updater';
 
 export type GameInstallInfo = {
 	packagesPath: string;
@@ -191,6 +193,13 @@ export type VerifyGameStateResult = {
 	recoveryPending: boolean;
 	enabledModCount: number;
 	disabledModCount: number;
+};
+
+export type UpdateInfo = {
+	available: boolean;
+	version: string | null;
+	body: string | null;
+	currentVersion: string;
 };
 
 export type VirtualFileMatch = {
@@ -447,6 +456,27 @@ export async function verifyGameState() {
 
 export async function exportDiagnosticReport(outputPath: string) {
 	return invoke<string>('export_diagnostic_report_command', { outputPath });
+}
+
+export async function checkForUpdates(): Promise<UpdateInfo> {
+	const update = await check();
+	if (!update) {
+		return { available: false, version: null, body: null, currentVersion: '0.1.0' };
+	}
+	return {
+		available: true,
+		version: update.version,
+		body: update.body ?? null,
+		currentVersion: '0.1.0'
+	};
+}
+
+export async function installAvailableUpdate() {
+	const update = await check();
+	if (!update) return false;
+	await update.downloadAndInstall();
+	await relaunch();
+	return true;
 }
 
 export async function searchVirtualFiles(query: string, sourceGroup: string | null, limit = 100) {
