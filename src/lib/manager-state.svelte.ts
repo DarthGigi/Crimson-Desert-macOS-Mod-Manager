@@ -246,7 +246,11 @@ class ManagerState {
 				this.refreshPatchSummaries(),
 				this.refreshPreview(),
 				this.refreshHistory(),
-				this.refreshProfiles()
+				this.refreshProfiles(),
+				this.refreshAsiPlugins(),
+				this.refreshBnkFiles(),
+				this.refreshIsolationSession(),
+				this.verifyGameState()
 			]);
 		} catch (error) {
 			this.setError(error, 'Could not load the mod manager dashboard');
