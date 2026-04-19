@@ -1,5 +1,12 @@
 # crimson-desert-macos-mod-manager
 
+## 0.1.3
+
+### Patch Changes
+
+- 440c29a: Refresh the project dependencies and validate the current toolchain state against the latest available compatible package releases.
+- 6c0b608: Fix CI updater signing for passwordless keys and clean up a stray duplicate Rust dependency declaration.
+
 ## 0.1.2
 
 ### Patch Changes
