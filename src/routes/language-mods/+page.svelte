@@ -112,7 +112,7 @@
 								<div class="flex flex-wrap gap-2">
 									<Badge>{mod.language?.toUpperCase() ?? 'Unassigned'}</Badge><Badge
 										variant="outline">{mod.modKind}</Badge
-									>
+									><Button variant="outline" size="sm" onclick={() => manager.classifyMod(mod, 'json_data', 'json_data')}>Unset language</Button><Button variant="destructive" size="sm" onclick={() => manager.removeMod(mod)}>Remove</Button>
 								</div>
 							</div>
 						</div>{/each}
