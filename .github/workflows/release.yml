@@ -31,16 +31,16 @@ jobs:
     runs-on: ${{ matrix.runner }}
     steps:
       - name: Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@v6
 
       - name: Setup Node
-        uses: actions/setup-node@v4
+        uses: actions/setup-node@v6
         with:
           node-version: lts/*
           cache: pnpm
 
       - name: Setup pnpm
-        uses: pnpm/action-setup@v4
+        uses: pnpm/action-setup@v5
         with:
           version: 10
 
@@ -92,20 +92,20 @@ jobs:
           } >> "$GITHUB_OUTPUT"
 
       - name: Upload app artifact
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: Crimson-Desert-Mod-Manager-${{ matrix.arch }}-app
           path: ${{ steps.bundle_paths.outputs.app_path }}
 
       - name: Upload dmg artifact
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: Crimson-Desert-Mod-Manager-${{ matrix.arch }}-dmg
           path: ${{ steps.bundle_paths.outputs.dmg_path }}
 
       - name: Upload updater metadata
         if: steps.bundle_paths.outputs.latest_json != ''
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: Crimson-Desert-Mod-Manager-${{ matrix.arch }}-updater
           path: |
@@ -131,7 +131,7 @@ jobs:
             ${{ steps.bundle_paths.outputs.updater_artifacts }}
 
       - name: Publish release assets
-        uses: softprops/action-gh-release@v2
+        uses: softprops/action-gh-release@v3
         with:
           tag_name: v${{ steps.version.outputs.version }}
           name: Crimson Desert Mod Manager v${{ steps.version.outputs.version }}
