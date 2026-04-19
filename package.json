@@ -1,7 +1,7 @@
 {
 	"name": "crimson-desert-macos-mod-manager",
 	"version": "0.1.0",
-	"description": "",
+	"description": "A macOS mod manager for Crimson Desert with JSON, overlay, PATHC, and archive workflows.",
 	"type": "module",
 	"scripts": {
 		"dev": "vite dev",
