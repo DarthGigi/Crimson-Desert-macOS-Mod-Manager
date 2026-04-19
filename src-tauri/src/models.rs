@@ -1,12 +1,16 @@
 use serde::{Deserialize, Serialize};
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum ModKind {
     JsonData,
     PrecompiledOverlay,
     BrowserRaw,
     Language,
+    Asi,
+    Bnk,
+    BinaryPatch,
+    ScriptInstaller,
 }
 
 impl ModKind {
@@ -16,6 +20,10 @@ impl ModKind {
             Self::PrecompiledOverlay => "precompiled_overlay",
             Self::BrowserRaw => "browser_raw",
             Self::Language => "language",
+            Self::Asi => "asi",
+            Self::Bnk => "bnk",
+            Self::BinaryPatch => "binary_patch",
+            Self::ScriptInstaller => "script_installer",
         }
     }
 
@@ -25,6 +33,10 @@ impl ModKind {
             "precompiled_overlay" => Some(Self::PrecompiledOverlay),
             "browser_raw" => Some(Self::BrowserRaw),
             "language" => Some(Self::Language),
+            "asi" => Some(Self::Asi),
+            "bnk" => Some(Self::Bnk),
+            "binary_patch" => Some(Self::BinaryPatch),
+            "script_installer" => Some(Self::ScriptInstaller),
             _ => None,
         }
     }
@@ -313,4 +325,37 @@ pub struct HistoryEntry {
     pub message: String,
     pub details_json: Option<String>,
     pub created_at: String,
+}
+
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ModProfile {
+    pub id: i64,
+    pub name: String,
+    pub description: Option<String>,
+    pub created_at: String,
+    pub updated_at: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct IsolationSession {
+    pub suspects: Vec<String>,
+    pub current_test_set: Vec<String>,
+    pub rounds: usize,
+    pub last_result: Option<bool>,
+    pub resolved_mod_id: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct VerifyGameStateResult {
+    pub packages_path: String,
+    pub meta_exists: bool,
+    pub pamt_exists: bool,
+    pub backup_exists: bool,
+    pub managed_group_count: usize,
+    pub recovery_pending: bool,
+    pub enabled_mod_count: usize,
+    pub disabled_mod_count: usize,
 }

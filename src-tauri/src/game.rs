@@ -61,6 +61,21 @@ pub fn packages_to_app_path(packages_path: &Path) -> Option<PathBuf> {
     }
 }
 
+pub fn external_mods_dir(packages_path: &Path) -> Option<PathBuf> {
+    let app_path = packages_to_app_path(packages_path)?;
+    Some(app_path.join("Contents").join("Resources").join("bin64"))
+}
+
+pub fn bnk_mods_dir(packages_path: &Path) -> Option<PathBuf> {
+	let app_path = packages_to_app_path(packages_path)?;
+	Some(app_path.join("Contents").join("Resources").join("soundbanks"))
+}
+
+pub fn script_mods_dir(packages_path: &Path) -> Option<PathBuf> {
+	let app_path = packages_to_app_path(packages_path)?;
+	Some(app_path.join("Contents").join("Resources").join("mod-scripts"))
+}
+
 pub fn inspect_game_install(packages_path: &Path, detected: bool) -> GameInstallInfo {
     let meta_exists = packages_path.join("meta").join("0.papgt").is_file();
     let pamt_exists = packages_path.join(SOURCE_GROUP).join("0.pamt").is_file();

@@ -40,7 +40,9 @@
 		</p>
 		<h1 class="text-3xl font-semibold tracking-tight">Language-targeted overlays</h1>
 		<p class="max-w-3xl text-sm leading-7 text-muted-foreground">
-			Choose the current in-game language and classify mods so only the matching overlays install.
+			Choose the language you use in the game. Then mark only translation/localization mods as
+			`language mods`. Those mods will only install when their saved language matches the one you
+			select here.
 		</p>
 	</div>
 	<Card.Root
@@ -48,10 +50,11 @@
 			><Card.Title class="flex items-center gap-2"
 				><Globe2 class="size-5" /> Selected language</Card.Title
 			><Card.Description
-				>Only language-classified mods with a matching language are applied.</Card.Description
+				>This is for localization-style mods only. Normal gameplay or texture mods should stay in
+				their regular categories.</Card.Description
 			></Card.Header
-		><Card.Content class="space-y-4"
-			><div class="flex flex-wrap gap-2">
+			><Card.Content class="space-y-4"
+				><div class="flex flex-wrap gap-2">
 				<Button
 					variant={manager.selectedLanguage === null ? 'default' : 'outline'}
 					size="sm"
@@ -67,6 +70,21 @@
 					>{manager.selectedLanguage?.toUpperCase() ?? 'Not set'}</span
 				>
 			</p></Card.Content
+		></Card.Root
+	>
+	<Card.Root
+		><Card.Content class="pt-6"
+			><div class="rounded-xl border bg-muted/20 p-4 text-sm leading-6 text-muted-foreground">
+				<p class="font-medium text-foreground">When should you use this?</p>
+				<p class="mt-2">
+					Use the language lane for subtitle, text, font, and translation mods that should only
+					activate for one in-game language.
+				</p>
+				<p class="mt-2">
+					Do not use it for regular gameplay changes like stamina, item balance, textures, or UI
+					mods unless the mod author specifically says it is language-specific.
+				</p>
+			</div></Card.Content
 		></Card.Root
 	>
 	<Card.Root

@@ -5,7 +5,7 @@ use std::path::{Path, PathBuf};
 use rusqlite::{params, Connection, OptionalExtension};
 
 use crate::error::{AppError, AppResult};
-use crate::models::{HistoryEntry, ManagedGroupRecord, ModKind, ModRecord};
+use crate::models::{HistoryEntry, ManagedGroupRecord, ModKind, ModProfile, ModRecord};
 use crate::util::{bool_to_int, int_to_bool, now_iso_string};
 
 pub const DATABASE_NAME: &str = "app.db";
@@ -68,12 +68,26 @@ pub fn connect(app_data_dir: &Path) -> AppResult<Connection> {
 		   created_at TEXT NOT NULL
 		 );
 
-		 CREATE TABLE IF NOT EXISTS patch_toggles (
+         CREATE TABLE IF NOT EXISTS patch_toggles (
 		   mod_id TEXT NOT NULL,
 		   patch_index INTEGER NOT NULL,
 		   enabled INTEGER NOT NULL,
 		   updated_at TEXT NOT NULL,
 		   PRIMARY KEY (mod_id, patch_index)
+		 );
+
+		 CREATE TABLE IF NOT EXISTS profiles (
+		   id INTEGER PRIMARY KEY AUTOINCREMENT,
+		   name TEXT NOT NULL UNIQUE,
+		   description TEXT,
+		   created_at TEXT NOT NULL,
+		   updated_at TEXT NOT NULL
+		 );
+
+		 CREATE TABLE IF NOT EXISTS profile_mods (
+		   profile_id INTEGER NOT NULL,
+		   mod_id TEXT NOT NULL,
+		   PRIMARY KEY (profile_id, mod_id)
 		 );",
     )?;
 
@@ -177,6 +191,82 @@ pub fn list_history(connection: &Connection, limit: usize) -> AppResult<Vec<Hist
     }
 
     Ok(entries)
+}
+
+pub fn list_profiles(connection: &Connection) -> AppResult<Vec<ModProfile>> {
+    let mut statement = connection.prepare(
+        "SELECT id, name, description, created_at, updated_at
+         FROM profiles
+         ORDER BY updated_at DESC, id DESC",
+    )?;
+
+    let rows = statement.query_map([], |row| {
+        Ok(ModProfile {
+            id: row.get(0)?,
+            name: row.get(1)?,
+            description: row.get(2)?,
+            created_at: row.get(3)?,
+            updated_at: row.get(4)?,
+        })
+    })?;
+
+    let mut profiles = Vec::new();
+    for row in rows {
+        profiles.push(row?);
+    }
+    Ok(profiles)
+}
+
+pub fn create_profile(connection: &Connection, name: &str, description: Option<&str>) -> AppResult<ModProfile> {
+    let now = now_iso_string();
+    connection.execute(
+        "INSERT INTO profiles(name, description, created_at, updated_at)
+         VALUES (?1, ?2, ?3, ?4)",
+        params![name, description, now, now],
+    )?;
+    let id = connection.last_insert_rowid();
+    Ok(ModProfile {
+        id,
+        name: name.to_string(),
+        description: description.map(str::to_string),
+        created_at: now.clone(),
+        updated_at: now,
+    })
+}
+
+pub fn delete_profile(connection: &Connection, profile_id: i64) -> AppResult<()> {
+    connection.execute("DELETE FROM profile_mods WHERE profile_id = ?1", params![profile_id])?;
+    connection.execute("DELETE FROM profiles WHERE id = ?1", params![profile_id])?;
+    Ok(())
+}
+
+pub fn save_profile_mods(connection: &mut Connection, profile_id: i64, mod_ids: &[String]) -> AppResult<()> {
+    let transaction = connection.transaction()?;
+    transaction.execute("DELETE FROM profile_mods WHERE profile_id = ?1", params![profile_id])?;
+    for mod_id in mod_ids {
+        transaction.execute(
+            "INSERT INTO profile_mods(profile_id, mod_id) VALUES (?1, ?2)",
+            params![profile_id, mod_id],
+        )?;
+    }
+    transaction.execute(
+        "UPDATE profiles SET updated_at = ?2 WHERE id = ?1",
+        params![profile_id, now_iso_string()],
+    )?;
+    transaction.commit()?;
+    Ok(())
+}
+
+pub fn profile_mod_ids(connection: &Connection, profile_id: i64) -> AppResult<Vec<String>> {
+    let mut statement = connection.prepare(
+        "SELECT mod_id FROM profile_mods WHERE profile_id = ?1 ORDER BY mod_id ASC",
+    )?;
+    let rows = statement.query_map(params![profile_id], |row| row.get::<_, String>(0))?;
+    let mut ids = Vec::new();
+    for row in rows {
+        ids.push(row?);
+    }
+    Ok(ids)
 }
 
 pub fn upsert_mod(connection: &Connection, record: &ModRecord) -> AppResult<()> {
@@ -335,6 +425,15 @@ pub fn set_patch_enabled(
 
 pub fn clear_patch_toggles(connection: &Connection) -> AppResult<()> {
     connection.execute("DELETE FROM patch_toggles", [])?;
+    Ok(())
+}
+
+pub fn delete_mod(connection: &Connection, mod_id: &str) -> AppResult<()> {
+    connection.execute("DELETE FROM patch_toggles WHERE mod_id = ?1", params![mod_id])?;
+    let deleted = connection.execute("DELETE FROM mods WHERE id = ?1", params![mod_id])?;
+    if deleted == 0 {
+        return Err(AppError::NotFound(format!("No mod found for id {mod_id}")));
+    }
     Ok(())
 }
 

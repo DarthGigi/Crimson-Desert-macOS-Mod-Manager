@@ -41,6 +41,10 @@ pub fn scan_mod_folder(folder: &Path, packages_dir: Option<&Path>) -> AppResult<
     collect_browser_raw_dirs(folder, &mut browser_raw_dirs)?;
     browser_raw_dirs.sort();
 
+    let mut special_dirs = Vec::new();
+    collect_special_mod_dirs(folder, &mut special_dirs)?;
+    special_dirs.sort();
+
     let indexes = if let Some(packages_dir) = packages_dir {
         let pamt_info = read_pamt_raw(&packages_dir.join("0008").join("0.pamt"))?;
         Some(build_file_index(&pamt_info))
@@ -134,6 +138,26 @@ pub fn scan_mod_folder(folder: &Path, packages_dir: Option<&Path>) -> AppResult<
         });
     }
 
+    for (dir, mod_kind) in special_dirs {
+        let record = inspect_special_mod(&dir, mod_kind)?;
+        results.push(ScanResult {
+            path: dir.display().to_string(),
+            mod_kind,
+            file_name: dir
+                .file_name()
+                .unwrap_or_default()
+                .to_string_lossy()
+                .to_string(),
+            name: record.name,
+            description: record.description,
+            patch_count: record.patch_count,
+            change_count: record.change_count,
+            target_files: record.target_files,
+            resolvable_files: 0,
+            missing_files: Vec::new(),
+        });
+    }
+
     Ok(results)
 }
 
@@ -171,6 +195,18 @@ pub fn scan_import_source(
 
 pub fn detect_import_kind(path: &Path) -> AppResult<ModKind> {
     if path.is_dir() {
+        if contains_asi_files(path) {
+            return Ok(ModKind::Asi);
+        }
+        if contains_bnk_files(path) {
+            return Ok(ModKind::Bnk);
+        }
+        if contains_binary_patch_files(path) {
+            return Ok(ModKind::BinaryPatch);
+        }
+        if contains_script_installer_files(path) {
+            return Ok(ModKind::ScriptInstaller);
+        }
         if inspect_precompiled_dir(path).is_ok() {
             return Ok(ModKind::PrecompiledOverlay);
         }
@@ -183,8 +219,25 @@ pub fn detect_import_kind(path: &Path) -> AppResult<ModKind> {
         )));
     }
 
-    load_manifest(path)?;
-    Ok(ModKind::JsonData)
+    let extension = path
+        .extension()
+        .and_then(|value| value.to_str())
+        .map(|value| value.to_ascii_lowercase())
+        .unwrap_or_default();
+    match extension.as_str() {
+        "json" | "modpatch" => {
+            load_manifest(path)?;
+            Ok(ModKind::JsonData)
+        }
+        "asi" | "dll" | "ini" => Ok(ModKind::Asi),
+        "bnk" => Ok(ModKind::Bnk),
+        "bsdiff" | "xdelta" => Ok(ModKind::BinaryPatch),
+        "bat" | "py" | "sh" | "command" => Ok(ModKind::ScriptInstaller),
+        _ => Err(AppError::InvalidMod(format!(
+            "{} is not a supported mod file",
+            path.display()
+        ))),
+    }
 }
 
 pub fn import_mod(
@@ -239,6 +292,21 @@ pub fn import_mod(
         ModKind::BrowserRaw => {
             let record = inspect_browser_raw_dir(source_path)?;
             copy_dir_all(source_path, &library_path)?;
+            (
+                record.name,
+                record.description,
+                record.patch_count,
+                record.change_count,
+                record.target_files,
+            )
+        }
+        ModKind::Asi | ModKind::Bnk | ModKind::BinaryPatch | ModKind::ScriptInstaller => {
+            let record = inspect_special_mod(source_path, mod_kind)?;
+            if source_path.is_dir() {
+                copy_dir_all(source_path, &library_path)?;
+            } else {
+                fs::copy(source_path, &library_path)?;
+            }
             (
                 record.name,
                 record.description,
@@ -328,9 +396,14 @@ pub fn load_enabled_manifests(
                     record.language.as_deref() == selected_language
                         && Path::new(&record.library_path).is_file()
                 }
-                ModKind::PrecompiledOverlay | ModKind::BrowserRaw => false,
+                ModKind::PrecompiledOverlay
+                | ModKind::BrowserRaw
+                | ModKind::Asi
+                | ModKind::Bnk
+                | ModKind::BinaryPatch
+                | ModKind::ScriptInstaller => false,
             }
-    }) {
+        }) {
         let manifest = load_manifest(Path::new(&record.library_path))?;
         let manifest = filter_disabled_patches(manifest, disabled_patches.get(&record.id));
         if manifest.patches.is_empty() {
@@ -446,6 +519,29 @@ fn collect_browser_raw_dirs(root: &Path, output: &mut Vec<PathBuf>) -> AppResult
     Ok(())
 }
 
+fn collect_special_mod_dirs(root: &Path, output: &mut Vec<(PathBuf, ModKind)>) -> AppResult<()> {
+    if is_precompiled_dir(root) || is_browser_raw_dir(root) {
+        return Ok(());
+    }
+
+    for mod_kind in [ModKind::Asi, ModKind::Bnk, ModKind::BinaryPatch, ModKind::ScriptInstaller] {
+        if is_special_mod_dir(root, mod_kind) {
+            output.push((root.to_path_buf(), mod_kind));
+            return Ok(());
+        }
+    }
+
+    for entry in fs::read_dir(root)? {
+        let entry = entry?;
+        let path = entry.path();
+        if path.is_dir() {
+            collect_special_mod_dirs(&path, output)?;
+        }
+    }
+
+    Ok(())
+}
+
 fn is_precompiled_dir(root: &Path) -> bool {
     let Ok(entries) = fs::read_dir(root) else {
         return false;
@@ -481,6 +577,141 @@ fn is_browser_raw_dir(root: &Path) -> bool {
                 .is_some_and(|name| name.len() == 4 && name.chars().all(|ch| ch.is_ascii_digit()))
             && contains_any_files(&path)
     })
+}
+
+fn contains_asi_files(root: &Path) -> bool {
+    any_matching_files(root, &["asi", "dll", "ini"])
+}
+
+fn contains_bnk_files(root: &Path) -> bool {
+    any_matching_files(root, &["bnk"])
+}
+
+fn contains_binary_patch_files(root: &Path) -> bool {
+    any_matching_files(root, &["bsdiff", "xdelta"])
+}
+
+fn contains_script_installer_files(root: &Path) -> bool {
+    any_matching_files(root, &["bat", "py", "sh", "command"])
+}
+
+fn any_matching_files(root: &Path, extensions: &[&str]) -> bool {
+    let Ok(entries) = fs::read_dir(root) else {
+        return false;
+    };
+
+    for entry in entries.flatten() {
+        let path = entry.path();
+        if path.is_dir() && any_matching_files(&path, extensions) {
+            return true;
+        }
+        if path.is_file()
+            && path
+                .extension()
+                .and_then(|value| value.to_str())
+                .is_some_and(|ext| extensions.iter().any(|candidate| ext.eq_ignore_ascii_case(candidate)))
+        {
+            return true;
+        }
+    }
+
+    false
+}
+
+fn inspect_special_mod(root: &Path, mod_kind: ModKind) -> AppResult<ModRecord> {
+    if !is_special_mod_dir(root, mod_kind) && !root.is_file() {
+        return Err(AppError::InvalidMod(format!(
+            "{} is not a supported {:?} mod source",
+            root.display(), mod_kind
+        )));
+    }
+
+    let name = read_precompiled_name(root).unwrap_or_else(|| {
+        root.file_stem()
+            .or_else(|| root.file_name())
+            .unwrap_or_default()
+            .to_string_lossy()
+            .to_string()
+    });
+    let description = read_precompiled_description(root);
+    let target_files = list_special_targets(root, mod_kind)?;
+
+    Ok(ModRecord {
+        id: String::new(),
+        mod_kind,
+        name,
+        description,
+        file_name: root
+            .file_name()
+            .unwrap_or_default()
+            .to_string_lossy()
+            .to_string(),
+        source_path: Some(root.display().to_string()),
+        library_path: root.display().to_string(),
+        enabled: false,
+        load_order: 0,
+        language: None,
+        install_group: None,
+        patch_count: target_files.len(),
+        change_count: 0,
+        target_files,
+        imported_at: String::new(),
+        updated_at: String::new(),
+    })
+}
+
+fn is_special_mod_dir(root: &Path, mod_kind: ModKind) -> bool {
+    match mod_kind {
+        ModKind::Asi => contains_asi_files(root),
+        ModKind::Bnk => contains_bnk_files(root),
+        ModKind::BinaryPatch => contains_binary_patch_files(root),
+        ModKind::ScriptInstaller => contains_script_installer_files(root),
+        _ => false,
+    }
+}
+
+fn list_special_targets(root: &Path, mod_kind: ModKind) -> AppResult<Vec<String>> {
+    let mut files = Vec::new();
+    collect_special_targets(root, root, &mut files, mod_kind)?;
+    files.sort();
+    files.dedup();
+    Ok(files)
+}
+
+fn collect_special_targets(
+    base: &Path,
+    current: &Path,
+    output: &mut Vec<String>,
+    mod_kind: ModKind,
+) -> AppResult<()> {
+    for entry in fs::read_dir(current)? {
+        let entry = entry?;
+        let path = entry.path();
+        if path.is_dir() {
+            collect_special_targets(base, &path, output, mod_kind)?;
+            continue;
+        }
+
+        let Some(ext) = path.extension().and_then(|value| value.to_str()) else {
+            continue;
+        };
+        let matches = match mod_kind {
+            ModKind::Asi => ["asi", "dll", "ini"].iter().any(|candidate| ext.eq_ignore_ascii_case(candidate)),
+            ModKind::Bnk => ext.eq_ignore_ascii_case("bnk"),
+            ModKind::BinaryPatch => ["bsdiff", "xdelta"].iter().any(|candidate| ext.eq_ignore_ascii_case(candidate)),
+            ModKind::ScriptInstaller => ["bat", "py", "sh", "command"].iter().any(|candidate| ext.eq_ignore_ascii_case(candidate)),
+            _ => false,
+        };
+        if matches {
+            let relative = path
+                .strip_prefix(base)
+                .unwrap_or(&path)
+                .to_string_lossy()
+                .replace('\\', "/");
+            output.push(relative);
+        }
+    }
+    Ok(())
 }
 
 fn inspect_precompiled_dir(root: &Path) -> AppResult<ModRecord> {

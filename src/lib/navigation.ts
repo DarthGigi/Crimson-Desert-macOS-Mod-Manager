@@ -16,7 +16,10 @@ export type AppSectionId =
 	| 'data-mods'
 	| 'language-mods'
 	| 'precompiled-mods'
+	| 'external-mods'
+	| 'asi-mods'
 	| 'library'
+	| 'profiles'
 	| 'apply-logs'
 	| 'tools'
 	| 'advanced';
@@ -66,6 +69,20 @@ export const appNavGroups: AppNavGroup[] = [
 				label: 'Precompiled Mods',
 				description: 'Folder mods that ship prebuilt numeric groups and meta files.',
 				icon: Package
+			},
+			{
+				id: 'external-mods',
+				href: '/external-mods',
+				label: 'External Mods',
+				description: 'ASI, BNK, binary patches, and script installers.',
+				icon: Archive
+			},
+			{
+				id: 'asi-mods',
+				href: '/asi-mods',
+				label: 'ASI Mods',
+				description: 'Import and manage ASI plugins and companion files.',
+				icon: Package
 			}
 		]
 	},
@@ -78,6 +95,13 @@ export const appNavGroups: AppNavGroup[] = [
 				label: 'Library',
 				description: 'Archive-first mod inventory across all supported types.',
 				icon: Archive
+			},
+			{
+				id: 'profiles',
+				href: '/profiles',
+				label: 'Profiles',
+				description: 'Save and restore curated sets of enabled mods.',
+				icon: Sparkles
 			},
 			{
 				id: 'apply-logs',

@@ -214,6 +214,7 @@ Cargo.lock
 
 .svelte-kit/
 package
+build
 
 ### VisualStudioCode ###
 .vscode/*

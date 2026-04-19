@@ -9,7 +9,15 @@ export type GameInstallInfo = {
 	detected: boolean;
 };
 
-export type ModKind = 'json_data' | 'precompiled_overlay' | 'browser_raw' | 'language';
+export type ModKind =
+	| 'json_data'
+	| 'precompiled_overlay'
+	| 'browser_raw'
+	| 'language'
+	| 'asi'
+	| 'bnk'
+	| 'binary_patch'
+	| 'script_installer';
 
 export type ModRecord = {
 	id: string;
@@ -158,6 +166,33 @@ export type HistoryEntry = {
 	createdAt: string;
 };
 
+export type ModProfile = {
+	id: number;
+	name: string;
+	description: string | null;
+	createdAt: string;
+	updatedAt: string;
+};
+
+export type IsolationSession = {
+	suspects: string[];
+	currentTestSet: string[];
+	rounds: number;
+	lastResult: boolean | null;
+	resolvedModId: string | null;
+};
+
+export type VerifyGameStateResult = {
+	packagesPath: string;
+	metaExists: boolean;
+	pamtExists: boolean;
+	backupExists: boolean;
+	managedGroupCount: number;
+	recoveryPending: boolean;
+	enabledModCount: number;
+	disabledModCount: number;
+};
+
 export type VirtualFileMatch = {
 	sourceGroup: string;
 	virtualPath: string;
@@ -187,6 +222,20 @@ export type XmlRepackResult = {
 	exactFit: boolean;
 	patchedInPlace: boolean;
 	outputPath: string | null;
+};
+
+export type AsiPluginInfo = {
+	name: string;
+	enabled: boolean;
+	path: string;
+	iniFiles: string[];
+	hookTargets: string[];
+};
+
+export type ExternalFileInfo = {
+	name: string;
+	path: string;
+	kind: string;
 };
 
 export type StatusSummary = {
@@ -234,6 +283,50 @@ export async function importModVariant(path: string, enable = true) {
 
 export async function setModEnabled(modId: string, enabled: boolean) {
 	return invoke<DashboardData>('set_mod_enabled_command', { modId, enabled });
+}
+
+export async function removeMod(modId: string) {
+	return invoke<DashboardData>('remove_mod_command', { modId });
+}
+
+export async function getAsiPlugins() {
+	return invoke<AsiPluginInfo[]>('get_asi_plugins_command');
+}
+
+export async function installAsiMod(modId: string) {
+	return invoke<DashboardData>('install_asi_mod_command', { modId });
+}
+
+export async function setAsiEnabled(pluginName: string, enabled: boolean) {
+	return invoke<AsiPluginInfo[]>('set_asi_enabled_command', { pluginName, enabled });
+}
+
+export async function removeAsiPlugin(pluginName: string) {
+	return invoke<AsiPluginInfo[]>('remove_asi_plugin_command', { pluginName });
+}
+
+export async function installBnkMod(modId: string) {
+	return invoke<DashboardData>('install_bnk_mod_command', { modId });
+}
+
+export async function getBnkFiles() {
+	return invoke<ExternalFileInfo[]>('get_bnk_files_command');
+}
+
+export async function removeBnkFile(name: string) {
+	return invoke<ExternalFileInfo[]>('remove_bnk_file_command', { name });
+}
+
+export async function installScriptMod(modId: string) {
+	return invoke<DashboardData>('install_script_mod_command', { modId });
+}
+
+export async function applyBinaryPatch(modId: string, targetFile: string, outputFile: string) {
+	return invoke<DashboardData>('apply_binary_patch_command', { modId, targetFile, outputFile });
+}
+
+export async function runScriptInstaller(modId: string, workingDir: string) {
+	return invoke<DashboardData>('run_script_installer_command', { modId, workingDir });
 }
 
 export async function setSelectedLanguage(language: string | null) {
@@ -310,6 +403,50 @@ export async function extractVirtualFile(
 
 export async function getHistory(limit = 50) {
 	return invoke<HistoryEntry[]>('get_history_command', { limit });
+}
+
+export async function getProfiles() {
+	return invoke<ModProfile[]>('get_profiles_command');
+}
+
+export async function createProfile(name: string, description: string | null) {
+	return invoke<ModProfile[]>('create_profile_command', { name, description });
+}
+
+export async function saveProfile(profileId: number) {
+	return invoke<ModProfile[]>('save_profile_command', { profileId });
+}
+
+export async function applyProfile(profileId: number) {
+	return invoke<DashboardData>('apply_profile_command', { profileId });
+}
+
+export async function deleteProfile(profileId: number) {
+	return invoke<ModProfile[]>('delete_profile_command', { profileId });
+}
+
+export async function getProblemModIsolation() {
+	return invoke<IsolationSession | null>('get_problem_mod_isolation_command');
+}
+
+export async function startProblemModIsolation() {
+	return invoke<DashboardData>('start_problem_mod_isolation_command');
+}
+
+export async function reportProblemModIsolation(crashed: boolean) {
+	return invoke<DashboardData>('report_problem_mod_isolation_command', { crashed });
+}
+
+export async function clearProblemModIsolation() {
+	return invoke<DashboardData>('clear_problem_mod_isolation_command');
+}
+
+export async function verifyGameState() {
+	return invoke<VerifyGameStateResult>('verify_game_state_command');
+}
+
+export async function exportDiagnosticReport(outputPath: string) {
+	return invoke<string>('export_diagnostic_report_command', { outputPath });
 }
 
 export async function searchVirtualFiles(query: string, sourceGroup: string | null, limit = 100) {

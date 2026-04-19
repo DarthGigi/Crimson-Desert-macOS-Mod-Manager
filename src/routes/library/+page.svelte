@@ -38,7 +38,8 @@
 		<h1 class="text-3xl font-semibold tracking-tight">Archive-first mod inventory</h1>
 		<p class="max-w-3xl text-sm leading-7 text-muted-foreground">
 			Browse all imported mods, search by file or target path, and classify mods into the language
-			lane when needed.
+			lane when needed. You can also remove imports here if you no longer want to keep them in the
+			local library.
 		</p>
 	</div>
 	<div class="space-y-2">
@@ -126,8 +127,13 @@
 													onclick={() =>
 														manager.classifyMod(mod, 'language', fallbackKindForLanguageMod(mod))}
 													>Language</Button
-												>{/if}
-										</div></Table.Cell
+													><Button
+														variant="destructive"
+														size="sm"
+														onclick={() => manager.removeMod(mod)}
+														>Remove</Button
+													>{/if}
+												</div></Table.Cell
 									></Table.Row
 								>{/each}</Table.Body
 						></Table.Root

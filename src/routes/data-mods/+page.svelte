@@ -11,9 +11,21 @@
 	import { Separator } from '$lib/components/ui/separator';
 	import * as ScrollArea from '$lib/components/ui/scroll-area';
 	import { manager } from '$lib/manager-state.svelte';
+    import type { ScanResult } from '$lib/desktop-api';
 
 	let importSourcePath = $state('');
 	let scanDetailsOpen = $state<Record<string, boolean>>({});
+	let variantGroupsOpen = $state<Record<string, boolean>>({});
+
+	type ScanVariantGroup = {
+		key: string;
+		label: string;
+		description: string;
+		results: ScanResult[];
+		isGrouped: boolean;
+	};
+
+	const groupedScanResults = $derived.by(() => buildVariantGroups(manager.scanResults));
 
 	onMount(() => {
 		void manager.ensureLoaded();
@@ -44,6 +56,88 @@
 			importSourcePath = selected;
 			await manager.scanImportSource(selected);
 		}
+	}
+
+	function buildVariantGroups(results: ScanResult[]): ScanVariantGroup[] {
+		const buckets = new Map<string, ScanResult[]>();
+		for (const result of results) {
+			const key = `${parentDirectory(result.path)}::${result.modKind}`;
+			const bucket = buckets.get(key) ?? [];
+			bucket.push(result);
+			buckets.set(key, bucket);
+		}
+
+		const groups: ScanVariantGroup[] = [];
+		for (const [key, bucket] of buckets) {
+			bucket.sort((left, right) => left.name.localeCompare(right.name));
+			if (bucket.length === 1) {
+				groups.push({
+					key: `${key}::single`,
+					label: bucket[0].name,
+					description: bucket[0].description ?? '',
+					results: bucket,
+					isGrouped: false
+				});
+				continue;
+			}
+
+			const label = commonVariantLabel(bucket);
+			if (!label) {
+				for (const result of bucket) {
+					groups.push({
+						key: `${key}::${result.path}`,
+						label: result.name,
+						description: result.description ?? '',
+						results: [result],
+						isGrouped: false
+					});
+				}
+				continue;
+			}
+
+			groups.push({
+				key,
+				label,
+				description: `${bucket.length} options in this family`,
+				results: bucket,
+				isGrouped: true
+			});
+		}
+
+		return groups.toSorted((left, right) => left.label.localeCompare(right.label));
+	}
+
+	function parentDirectory(path: string) {
+		const normalized = path.replaceAll('\\', '/');
+		const slash = normalized.lastIndexOf('/');
+		return slash === -1 ? normalized : normalized.slice(0, slash);
+	}
+
+	function commonVariantLabel(results: ScanResult[]) {
+		const tokenized = results.map((result) =>
+			result.name
+				.toLowerCase()
+				.replaceAll(/[_-]+/g, ' ')
+				.replaceAll(/\b(v|ver|version)\s*\d+(?:\.\d+)*\b/g, '')
+				.replaceAll(/\b\d+(?:x|%)\b/g, '')
+				.trim()
+				.split(/\s+/)
+				.filter(Boolean)
+		);
+
+		if (tokenized.length === 0) return null;
+		const prefix: string[] = [];
+		for (let index = 0; index < tokenized[0].length; index += 1) {
+			const token = tokenized[0][index];
+			if (tokenized.every((tokens) => tokens[index] === token)) {
+				prefix.push(token);
+			} else {
+				break;
+			}
+		}
+
+		if (prefix.length === 0) return null;
+		return prefix.map((token) => token.charAt(0).toUpperCase() + token.slice(1)).join(' ');
 	}
 </script>
 
@@ -78,6 +172,11 @@
 				<Button variant="outline" disabled={manager.busy.scanningMods} onclick={chooseZip}
 					><HardDriveDownload class="size-4" /> Choose archive</Button
 				>
+				{#if manager.scanResults.length > 1}
+					<Button variant="outline" disabled={manager.busy.importing} onclick={() => manager.importScanResults(manager.scanResults)}
+						>Import all scanned mods</Button
+					>
+				{/if}
 			</div>
 			{#if importSourcePath}<p class="text-sm break-all text-muted-foreground">
 					{importSourcePath}
@@ -94,45 +193,76 @@
 			{:else}
 				<ScrollArea.Root class="h-96 rounded-xl border"
 					><div class="space-y-3 p-3">
-						{#each manager.scanResults as result (result.path)}<Collapsible.Root
-								open={Boolean(scanDetailsOpen[result.path])}
-								class="rounded-xl border bg-muted/20 px-4 py-4"
-								><div class="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
+						{#each groupedScanResults as group (group.key)}
+							<Collapsible.Root open={Boolean(variantGroupsOpen[group.key])} class="rounded-xl border bg-muted/20 px-4 py-4">
+								<div class="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
 									<div class="space-y-2">
-										<p class="font-medium">{result.name}</p>
-										<p class="text-sm text-muted-foreground">{result.fileName}</p>
+										<p class="font-medium">{group.label}</p>
+										<p class="text-sm text-muted-foreground">
+											{group.isGrouped ? group.description : group.results[0].fileName}
+										</p>
 										<div class="flex flex-wrap gap-2">
-											<Badge variant="secondary">{result.modKind}</Badge><Badge variant="outline"
-												>{result.patchCount} groups</Badge
-											><Badge variant="outline">{result.changeCount} changes</Badge>
+											<Badge variant="secondary">{group.results[0].modKind}</Badge>
+											<Badge variant="outline">{group.results.length} option{group.results.length === 1 ? '' : 's'}</Badge>
+											<Badge variant="outline">{group.results.reduce((sum, result) => sum + result.changeCount, 0)} total changes</Badge>
 										</div>
 									</div>
 									<div class="flex gap-2">
-										<Button
-											variant="outline"
-											size="sm"
-											onclick={() => (scanDetailsOpen[result.path] = !scanDetailsOpen[result.path])}
-											>{scanDetailsOpen[result.path] ? 'Hide details' : 'Details'}</Button
-										><Button
-											size="sm"
-											disabled={manager.busy.importing}
-											onclick={() => manager.importScanResult(result)}>Import</Button
-										>
+										{#if group.results.length === 1}
+											<Button size="sm" disabled={manager.busy.importing} onclick={() => manager.importScanResult(group.results[0])}>
+												Import
+											</Button>
+										{/if}
+										{#if group.results.length > 1}
+											<Button variant="outline" size="sm" disabled={manager.busy.importing} onclick={() => manager.importScanResults(group.results)}>Import all</Button>
+										{/if}
+										<Button variant="outline" size="sm" onclick={() => (variantGroupsOpen[group.key] = !variantGroupsOpen[group.key])}>
+											{variantGroupsOpen[group.key] ? 'Hide options' : group.results.length > 1 ? 'Show options' : 'Details'}
+										</Button>
 									</div>
 								</div>
-								<Collapsible.Content class="pt-4"
-									><Separator class="mb-4" />{#if result.description}<p
-											class="text-sm leading-6 text-muted-foreground"
-										>
-											{result.description}
-										</p>{/if}
-									<div class="mt-4 flex flex-wrap gap-2">
-										{#each result.targetFiles as target (target)}<Badge variant="outline"
-												>{target}</Badge
-											>{/each}
-									</div></Collapsible.Content
-								></Collapsible.Root
-							>{/each}
+
+								<Collapsible.Content class="pt-4">
+									<Separator class="mb-4" />
+									<div class="space-y-3">
+										{#each group.results as result (result.path)}
+											<div class="rounded-lg border bg-background/60 px-4 py-4">
+												<div class="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
+													<div class="space-y-2">
+														<p class="font-medium">{result.name}</p>
+														<p class="text-sm text-muted-foreground">{result.fileName}</p>
+														<div class="flex flex-wrap gap-2">
+															<Badge variant="outline">{result.patchCount} groups</Badge>
+															<Badge variant="outline">{result.changeCount} changes</Badge>
+														</div>
+													</div>
+													<div class="flex gap-2">
+														<Button variant="outline" size="sm" onclick={() => (scanDetailsOpen[result.path] = !scanDetailsOpen[result.path])}>
+															{scanDetailsOpen[result.path] ? 'Hide details' : 'Details'}
+														</Button>
+														<Button size="sm" disabled={manager.busy.importing} onclick={() => manager.importScanResult(result)}>Import</Button>
+													</div>
+												</div>
+
+												{#if scanDetailsOpen[result.path]}
+													<div class="mt-4">
+														<Separator class="mb-4" />
+														{#if result.description}
+															<p class="text-sm leading-6 text-muted-foreground">{result.description}</p>
+														{/if}
+														<div class="mt-4 flex flex-wrap gap-2">
+															{#each result.targetFiles as target (target)}
+																<Badge variant="outline">{target}</Badge>
+															{/each}
+														</div>
+													</div>
+												{/if}
+											</div>
+										{/each}
+									</div>
+								</Collapsible.Content>
+							</Collapsible.Root>
+						{/each}
 					</div></ScrollArea.Root
 				>
 			{/if}

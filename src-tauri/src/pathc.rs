@@ -349,10 +349,8 @@ fn update_entry(
     dds_index: u32,
     m: (u32, u32, u32, u32),
 ) -> bool {
-    let target_hash = hashlittle(
-        normalize_path(virtual_path).to_lowercase().as_bytes(),
-        HASH_INITVAL,
-    );
+    let normalized = normalize_path(virtual_path);
+    let target_hash = hashlittle(normalized.to_lowercase().as_bytes(), HASH_INITVAL);
     let idx = match pathc.key_hashes.binary_search(&target_hash) {
         Ok(index) => index,
         Err(index) => {
@@ -371,12 +369,52 @@ fn update_entry(
         }
     };
 
+    if let Some((start, end)) = collision_range(pathc.map_entries[idx].selector) {
+        let start_index = start as usize;
+        let end_index = end as usize;
+        let mut slice = pathc.collision_entries[start_index..end_index].to_vec();
+        if let Some(existing) = slice
+            .iter_mut()
+            .find(|entry| normalize_path(&entry.path).to_lowercase() == normalized.to_lowercase())
+        {
+            existing.dds_index = dds_index;
+            existing.m1 = m.0;
+            existing.m2 = m.1;
+            existing.m3 = m.2;
+            existing.m4 = m.3;
+        } else {
+            slice.push(PathcCollisionEntry {
+                dds_index,
+                m1: m.0,
+                m2: m.1,
+                m3: m.2,
+                m4: m.3,
+                path: normalized,
+            });
+            slice.sort_by(|left, right| left.path.cmp(&right.path));
+        }
+
+        pathc.collision_entries.splice(start_index..end_index, slice.clone());
+        let new_start = start;
+        let new_end = new_start + slice.len() as u16;
+        pathc.map_entries[idx].selector = collision_selector(new_start, new_end);
+        pathc.map_entries[idx].m1 = 0;
+        pathc.map_entries[idx].m2 = 0;
+        pathc.map_entries[idx].m3 = 0;
+        pathc.map_entries[idx].m4 = 0;
+        return true;
+    }
+
     pathc.map_entries[idx].selector = 0xFFFF_0000 | (dds_index & 0xFFFF);
     pathc.map_entries[idx].m1 = m.0;
     pathc.map_entries[idx].m2 = m.1;
     pathc.map_entries[idx].m3 = m.2;
     pathc.map_entries[idx].m4 = m.3;
     true
+}
+
+fn collision_selector(start: u16, end: u16) -> u32 {
+	(((end & 0x00FF) as u32) << 24) | (((start & 0x00FF) as u32) << 16) | 0xFFFF
 }
 
 fn collect_dds_files(root: &Path) -> AppResult<Vec<PathBuf>> {
@@ -673,5 +711,43 @@ mod tests {
         assert!(Path::new(&result.backup_path).is_file());
 
         let _ = fs::remove_dir_all(&temp_root);
+    }
+
+    #[test]
+    fn updates_existing_collision_entry_in_place() {
+        let mut pathc = PathcFile {
+            header: PathcHeader {
+                unknown0: 0,
+                unknown1: 0,
+                dds_record_size: 128,
+                dds_record_count: 1,
+                hash_count: 1,
+                collision_path_count: 1,
+                collision_blob_size: 0,
+            },
+            dds_records: vec![vec![0; 128]],
+            key_hashes: vec![hashlittle(normalize_path("/foo/bar.dds").to_lowercase().as_bytes(), HASH_INITVAL)],
+            map_entries: vec![PathcMapEntry {
+                selector: collision_selector(0, 1),
+                m1: 0,
+                m2: 0,
+                m3: 0,
+                m4: 0,
+            }],
+            collision_entries: vec![PathcCollisionEntry {
+                dds_index: 0,
+                m1: 1,
+                m2: 2,
+                m3: 3,
+                m4: 4,
+                path: "/foo/bar.dds".to_string(),
+            }],
+        };
+
+        let updated = update_entry(&mut pathc, "/foo/bar.dds", 7, (10, 20, 30, 40));
+        assert!(updated);
+        assert_eq!(pathc.collision_entries.len(), 1);
+        assert_eq!(pathc.collision_entries[0].dds_index, 7);
+        assert_eq!(pathc.collision_entries[0].m1, 10);
     }
 }

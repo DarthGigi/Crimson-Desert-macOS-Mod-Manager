@@ -1,19 +1,23 @@
 <script lang="ts">
 	import { onMount } from 'svelte';
 	import { open } from '@tauri-apps/plugin-dialog';
-	import { AlertCircle, Gamepad2, Wrench } from '@lucide/svelte';
+	import { AlertCircle, Gamepad2, Sparkles, Wrench } from '@lucide/svelte';
 	import * as Alert from '$lib/components/ui/alert';
 	import { Button } from '$lib/components/ui/button';
 	import * as Card from '$lib/components/ui/card';
 	import { Input } from '$lib/components/ui/input';
 	import { Label } from '$lib/components/ui/label';
+	import * as Empty from '$lib/components/ui/empty';
+	import { Badge } from '$lib/components/ui/badge';
 	import { manager } from '$lib/manager-state.svelte';
 
 	let gamePathInput = $state('');
+	let reportOutputPath = $state('');
 
 	onMount(async () => {
 		await manager.ensureLoaded();
 		gamePathInput = manager.install?.packagesPath ?? '';
+		await Promise.all([manager.refreshIsolationSession(), manager.verifyGameState()]);
 	});
 
 	async function chooseGamePath() {
@@ -24,6 +28,16 @@
 			title: 'Choose Crimson Desert.app or packages directory'
 		});
 		if (typeof selected === 'string') gamePathInput = selected;
+	}
+
+	async function chooseReportOutput() {
+		const selected = await open({
+			multiple: false,
+			directory: false,
+			defaultPath: reportOutputPath || undefined,
+			title: 'Choose where to save the diagnostic report'
+		});
+		if (typeof selected === 'string') reportOutputPath = selected;
 	}
 </script>
 
@@ -113,6 +127,35 @@
 				Fix Everything restores vanilla state, clears manager-owned groups, disables mods, clears
 				patch toggles, and resets import cache.
 			</p></Card.Content
+		></Card.Root
+	>
+	<Card.Root
+		><Card.Header
+			><Card.Title class="flex items-center gap-2"
+				><Sparkles class="size-5" /> Problem-mod isolation</Card.Title
+			><Card.Description
+				>Use a guided binary-search workflow to narrow down which currently enabled mod is causing a crash or bad behavior.</Card.Description
+			></Card.Header
+		><Card.Content class="space-y-4"
+			>{#if !manager.isolationSession}<div class="flex flex-wrap gap-2"><Button onclick={() => manager.startProblemModIsolation()}>Start isolation</Button></div><p class="text-sm text-muted-foreground">Enable the mods you want to test first, then start isolation. The app will temporarily narrow the enabled set each round.</p>{:else}<div class="rounded-xl border bg-muted/20 p-4 text-sm"><p class="font-medium">Round {manager.isolationSession.rounds}</p><p class="mt-2 text-muted-foreground">Testing {manager.isolationSession.currentTestSet.length} mod(s) out of {manager.isolationSession.suspects.length} suspect(s).</p>{#if manager.isolationSession.resolvedModId}<p class="mt-2 text-destructive">Likely culprit: {manager.isolationSession.resolvedModId}</p>{/if}</div><div class="flex flex-wrap gap-2"><Button variant="destructive" onclick={() => manager.reportProblemModIsolation(true)}>This set crashed</Button><Button variant="outline" onclick={() => manager.reportProblemModIsolation(false)}>This set is stable</Button><Button variant="outline" onclick={() => manager.clearProblemModIsolation()}>Clear session</Button></div>{/if}</Card.Content
+		></Card.Root
+	>
+	<Card.Root
+		><Card.Header
+			><Card.Title>Verify game state</Card.Title><Card.Description
+				>Quick health summary for the current install, overlay state, backup, and recovery markers.</Card.Description
+			></Card.Header
+		><Card.Content class="space-y-4"
+			><div class="flex flex-wrap gap-2"><Button variant="outline" onclick={() => manager.verifyGameState()}>Refresh verification</Button></div>{#if manager.gameStateReport}<div class="grid gap-3 sm:grid-cols-3"><div class="rounded-xl border bg-muted/20 p-4"><p class="text-xs uppercase tracking-[0.18em] text-muted-foreground">Metadata</p><p class="mt-2 text-sm">{manager.gameStateReport.metaExists ? '0.papgt present' : 'Missing 0.papgt'}</p></div><div class="rounded-xl border bg-muted/20 p-4"><p class="text-xs uppercase tracking-[0.18em] text-muted-foreground">Base archive</p><p class="mt-2 text-sm">{manager.gameStateReport.pamtExists ? '0008/0.pamt present' : 'Missing 0008/0.pamt'}</p></div><div class="rounded-xl border bg-muted/20 p-4"><p class="text-xs uppercase tracking-[0.18em] text-muted-foreground">Recovery</p><p class="mt-2 text-sm">{manager.gameStateReport.recoveryPending ? 'Pending recovery marker' : 'No pending recovery marker'}</p></div></div><div class="flex flex-wrap gap-2"><Badge variant="outline">{manager.gameStateReport.enabledModCount} enabled</Badge><Badge variant="outline">{manager.gameStateReport.disabledModCount} disabled</Badge><Badge variant="outline">{manager.gameStateReport.managedGroupCount} managed groups</Badge>{#if manager.gameStateReport.backupExists}<Badge variant="outline">Backup present</Badge>{/if}</div>{/if}</Card.Content
+		></Card.Root
+	>
+	<Card.Root
+		><Card.Header
+			><Card.Title>Diagnostic report</Card.Title><Card.Description
+				>Export a JSON report containing dashboard state, history, and any active isolation session.</Card.Description
+			></Card.Header
+		><Card.Content class="space-y-4"
+			><div class="space-y-2"><Label for="report-output">Report output path</Label><div class="flex flex-wrap gap-2"><Input id="report-output" bind:value={reportOutputPath} placeholder="Choose where to save the diagnostic report" /><Button variant="outline" onclick={chooseReportOutput}>Browse</Button><Button onclick={() => manager.exportDiagnosticReport(reportOutputPath)}>Export report</Button></div></div></Card.Content
 		></Card.Root
 	>
 </div>

@@ -4,43 +4,70 @@ import {
 	applyMods,
 	detectGameInstall,
 	getApplyPreview,
+	getAsiPlugins,
+	getBnkFiles,
 	getDashboard,
+	exportDiagnosticReport,
 	getHistory,
+	getProfiles,
+	getProblemModIsolation,
 	getModPatchSummaries,
 	getPathcSummary,
 	extractXmlEntry,
 	searchVirtualFiles,
 	getVirtualFilePreview,
 	importModVariant,
+	installAsiMod,
+	installBnkMod,
+	installScriptMod,
+	applyBinaryPatch,
+	runScriptInstaller,
 	launchGame,
 	moveModInLoadOrder,
+	removeMod,
+	removeBnkFile,
 	type ApplyPreview,
 	type ApplyResult,
+	type AsiPluginInfo,
 	type DashboardData,
+    type ExternalFileInfo,
 	type ExtractPreview,
 	type ExtractResult,
 	type HistoryEntry,
+	type IsolationSession,
 	type ModKind,
 	type ModPatchSummary,
+	type ModProfile,
 	type ModRecord,
 	type PathcRepackResult,
 	type PathcSummary,
 	type ScanResult,
 	type VirtualFileMatch,
+	type VerifyGameStateResult,
 	type XmlPreview,
 	type XmlRepackResult,
+	applyProfile,
+	clearProblemModIsolation,
+	createProfile,
+	deleteProfile,
 	fixEverything,
 	repackPathc,
 	resetActiveMods,
 	restoreVanilla,
 	scanModFolder,
+	startProblemModIsolation,
+	reportProblemModIsolation,
 	setModClassification,
 	setGameInstall,
 	setPatchEnabled,
 	setSelectedLanguage,
 	setModEnabled,
 	extractVirtualFile,
-	repackXmlEntry
+	repackXmlEntry,
+	removeAsiPlugin,
+	saveProfile,
+	setAsiEnabled,
+	verifyGameState
 } from '$lib/desktop-api';
 
 export type ManagerMessage = {
@@ -59,6 +86,11 @@ class ManagerState {
 	xmlPreview = $state<XmlPreview | null>(null);
 	xmlRepackResult = $state<XmlRepackResult | null>(null);
 	historyEntries = $state<HistoryEntry[]>([]);
+	asiPlugins = $state<AsiPluginInfo[]>([]);
+	bnkFiles = $state<ExternalFileInfo[]>([]);
+	profiles = $state<ModProfile[]>([]);
+	isolationSession = $state<IsolationSession | null>(null);
+	gameStateReport = $state<VerifyGameStateResult | null>(null);
 	virtualFileMatches = $state<VirtualFileMatch[]>([]);
 	patchSummaries = $state<ModPatchSummary[]>([]);
 	scanResults = $state<ScanResult[]>([]);
@@ -84,6 +116,8 @@ class ManagerState {
 		extracting: false,
 		searchingFiles: false,
 		xml: false,
+		asi: false,
+		external: false,
 		toggling: ''
 	});
 
@@ -143,6 +177,22 @@ class ManagerState {
 		);
 	}
 
+	get asiMods() {
+		return this.allMods.filter((mod) => mod.modKind === 'asi');
+	}
+
+	get bnkMods() {
+		return this.allMods.filter((mod) => mod.modKind === 'bnk');
+	}
+
+	get scriptMods() {
+		return this.allMods.filter((mod) => mod.modKind === 'script_installer');
+	}
+
+	get binaryPatchMods() {
+		return this.allMods.filter((mod) => mod.modKind === 'binary_patch');
+	}
+
 	get previewConflictFiles() {
 		return this.applyPreview?.files.filter((file) => file.overlapCount > 0) ?? [];
 	}
@@ -195,7 +245,8 @@ class ManagerState {
 			await Promise.all([
 				this.refreshPatchSummaries(),
 				this.refreshPreview(),
-				this.refreshHistory()
+				this.refreshHistory(),
+				this.refreshProfiles()
 			]);
 		} catch (error) {
 			this.setError(error, 'Could not load the mod manager dashboard');
@@ -304,6 +355,63 @@ class ManagerState {
 		}
 	}
 
+	async refreshProfiles() {
+		try {
+			this.profiles = await getProfiles();
+		} catch (error) {
+			this.profiles = [];
+			this.setError(error, 'Could not load profiles');
+		}
+	}
+
+	async refreshIsolationSession() {
+		try {
+			this.isolationSession = await getProblemModIsolation();
+		} catch (error) {
+			this.isolationSession = null;
+			this.setError(error, 'Could not load isolation session');
+		}
+	}
+
+	async verifyGameState() {
+		try {
+			this.gameStateReport = await verifyGameState();
+		} catch (error) {
+			this.gameStateReport = null;
+			this.setError(error, 'Could not verify game state');
+		}
+	}
+
+	async refreshAsiPlugins() {
+		this.busy.asi = true;
+		try {
+			this.asiPlugins = await getAsiPlugins();
+		} catch {
+			this.asiPlugins = [];
+		} finally {
+			this.busy.asi = false;
+		}
+	}
+
+	async refreshBnkFiles() {
+		try {
+			this.bnkFiles = await getBnkFiles();
+		} catch {
+			this.bnkFiles = [];
+		}
+	}
+
+	async removeBnkFile(name: string) {
+		this.clearMessage();
+		try {
+			this.bnkFiles = await removeBnkFile(name);
+			await this.refreshHistory();
+			toast.success(`Removed BNK file ${name}.`);
+		} catch (error) {
+			this.setError(error, `Could not remove ${name}`);
+		}
+	}
+
 	async scanImportSource(path: string) {
 		this.busy.scanningMods = true;
 		this.clearMessage();
@@ -345,6 +453,42 @@ class ManagerState {
 		}
 	}
 
+	async importScanResults(results: ScanResult[]) {
+		if (results.length === 0) return;
+
+		this.busy.importing = true;
+		this.clearMessage();
+		let importedCount = 0;
+		let lastError: unknown = null;
+
+		for (const result of results) {
+			try {
+				this.dashboard = await importModVariant(result.path, true);
+				importedCount += 1;
+			} catch (error) {
+				lastError = error;
+				break;
+			}
+		}
+
+		try {
+			await Promise.all([
+				this.refreshPatchSummaries(),
+				this.refreshPreview(),
+				this.refreshHistory()
+			]);
+		} finally {
+			this.busy.importing = false;
+		}
+
+		if (lastError) {
+			this.setError(lastError, importedCount > 0 ? `Imported ${importedCount} mods before an error occurred` : 'Could not batch import mods');
+			return;
+		}
+
+		toast.success(`Imported ${importedCount} mod${importedCount === 1 ? '' : 's'}.`);
+	}
+
 	async toggleMod(mod: ModRecord) {
 		this.busy.toggling = mod.id;
 		this.clearMessage();
@@ -360,6 +504,107 @@ class ManagerState {
 			this.setError(error, `Could not update ${mod.name}`);
 		} finally {
 			this.busy.toggling = '';
+		}
+	}
+
+	async removeMod(mod: ModRecord) {
+		this.clearMessage();
+		try {
+			this.dashboard = await removeMod(mod.id);
+			await Promise.all([
+				this.refreshPatchSummaries(),
+				this.refreshPreview(),
+				this.refreshHistory()
+			]);
+			toast.success(`Removed ${mod.name}.`);
+		} catch (error) {
+			this.setError(error, `Could not remove ${mod.name}`);
+		}
+	}
+
+	async installAsiMod(mod: ModRecord) {
+		this.busy.asi = true;
+		this.clearMessage();
+		try {
+			this.dashboard = await installAsiMod(mod.id);
+			await Promise.all([this.refreshAsiPlugins(), this.refreshHistory()]);
+			toast.success(`Installed ASI files for ${mod.name}.`);
+		} catch (error) {
+			this.setError(error, `Could not install ${mod.name}`);
+		} finally {
+			this.busy.asi = false;
+		}
+	}
+
+	async installBnkMod(mod: ModRecord) {
+		this.clearMessage();
+		try {
+			this.dashboard = await installBnkMod(mod.id);
+			await Promise.all([this.refreshBnkFiles(), this.refreshHistory()]);
+			toast.success(`Installed BNK files for ${mod.name}.`);
+		} catch (error) {
+			this.setError(error, `Could not install ${mod.name}`);
+		}
+	}
+
+	async installScriptMod(mod: ModRecord) {
+		this.clearMessage();
+		try {
+			this.dashboard = await installScriptMod(mod.id);
+			await this.refreshHistory();
+			toast.success(`Installed script files for ${mod.name}.`);
+		} catch (error) {
+			this.setError(error, `Could not install ${mod.name}`);
+		}
+	}
+
+	async applyBinaryPatch(mod: ModRecord, targetFile: string, outputFile: string) {
+		this.clearMessage();
+		try {
+			this.dashboard = await applyBinaryPatch(mod.id, targetFile, outputFile);
+			await this.refreshHistory();
+			toast.success(`Applied binary patch ${mod.name}.`);
+		} catch (error) {
+			this.setError(error, `Could not apply ${mod.name}`);
+		}
+	}
+
+	async runScriptInstaller(mod: ModRecord, workingDir: string) {
+		this.clearMessage();
+		try {
+			this.dashboard = await runScriptInstaller(mod.id, workingDir);
+			await this.refreshHistory();
+			toast.success(`Executed script installer ${mod.name}.`);
+		} catch (error) {
+			this.setError(error, `Could not run ${mod.name}`);
+		}
+	}
+
+	async setAsiEnabled(pluginName: string, enabled: boolean) {
+		this.busy.asi = true;
+		this.clearMessage();
+		try {
+			this.asiPlugins = await setAsiEnabled(pluginName, enabled);
+			await this.refreshHistory();
+			toast.success(`${pluginName} ${enabled ? 'enabled' : 'disabled'}.`);
+		} catch (error) {
+			this.setError(error, `Could not update ${pluginName}`);
+		} finally {
+			this.busy.asi = false;
+		}
+	}
+
+	async removeAsiPlugin(pluginName: string) {
+		this.busy.asi = true;
+		this.clearMessage();
+		try {
+			this.asiPlugins = await removeAsiPlugin(pluginName);
+			await this.refreshHistory();
+			toast.success(`Removed ${pluginName}.`);
+		} catch (error) {
+			this.setError(error, `Could not remove ${pluginName}`);
+		} finally {
+			this.busy.asi = false;
 		}
 	}
 
@@ -489,6 +734,98 @@ class ManagerState {
 			this.setError(error, 'Could not run Fix Everything');
 		} finally {
 			this.busy.fixing = false;
+		}
+	}
+
+	async createProfile(name: string, description: string | null) {
+		this.clearMessage();
+		try {
+			this.profiles = await createProfile(name, description);
+			await this.refreshHistory();
+			toast.success(`Created profile ${name}.`);
+		} catch (error) {
+			this.setError(error, 'Could not create profile');
+		}
+	}
+
+	async saveProfile(profileId: number) {
+		this.clearMessage();
+		try {
+			this.profiles = await saveProfile(profileId);
+			await this.refreshHistory();
+			toast.success('Saved current enabled mods to the profile.');
+		} catch (error) {
+			this.setError(error, 'Could not save profile');
+		}
+	}
+
+	async applyProfile(profileId: number) {
+		this.clearMessage();
+		try {
+			this.dashboard = await applyProfile(profileId);
+			await Promise.all([
+				this.refreshPatchSummaries(),
+				this.refreshPreview(),
+				this.refreshHistory()
+			]);
+			toast.success('Applied profile.');
+		} catch (error) {
+			this.setError(error, 'Could not apply profile');
+		}
+	}
+
+	async deleteProfile(profileId: number) {
+		this.clearMessage();
+		try {
+			this.profiles = await deleteProfile(profileId);
+			await this.refreshHistory();
+			toast.success('Deleted profile.');
+		} catch (error) {
+			this.setError(error, 'Could not delete profile');
+		}
+	}
+
+	async startProblemModIsolation() {
+		this.clearMessage();
+		try {
+			this.dashboard = await startProblemModIsolation();
+			await Promise.all([this.refreshIsolationSession(), this.refreshHistory()]);
+			toast.success('Started problem-mod isolation. Test the current mod set and report the result.');
+		} catch (error) {
+			this.setError(error, 'Could not start problem-mod isolation');
+		}
+	}
+
+	async reportProblemModIsolation(crashed: boolean) {
+		this.clearMessage();
+		try {
+			this.dashboard = await reportProblemModIsolation(crashed);
+			await Promise.all([this.refreshIsolationSession(), this.refreshHistory()]);
+			toast.success(crashed ? 'Marked the current test set as crashing.' : 'Marked the current test set as stable.');
+		} catch (error) {
+			this.setError(error, 'Could not update problem-mod isolation');
+		}
+	}
+
+	async clearProblemModIsolation() {
+		this.clearMessage();
+		try {
+			this.dashboard = await clearProblemModIsolation();
+			await Promise.all([this.refreshIsolationSession(), this.refreshHistory()]);
+			toast.success('Cleared the problem-mod isolation session.');
+		} catch (error) {
+			this.setError(error, 'Could not clear problem-mod isolation');
+		}
+	}
+
+	async exportDiagnosticReport(outputPath: string) {
+		this.clearMessage();
+		try {
+			const path = await exportDiagnosticReport(outputPath);
+			await this.refreshHistory();
+			toast.success(`Exported diagnostic report to ${path}.`);
+		} catch (error) {
+			this.setError(error, 'Could not export diagnostic report');
 		}
 	}
 

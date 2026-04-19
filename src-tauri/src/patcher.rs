@@ -336,6 +336,7 @@ pub fn apply_mods(
                     ModKind::Language => {
                         is_dir_backed && record.language.as_deref() == selected_language
                     }
+                    ModKind::Asi | ModKind::Bnk | ModKind::BinaryPatch | ModKind::ScriptInstaller => false,
                     ModKind::JsonData => false,
                 }
         })
@@ -474,6 +475,7 @@ pub fn apply_mods(
                     install_precompiled_mod(game_dir, &papgt_path, record, &mut next_group)?
                 }
             }
+            ModKind::Asi | ModKind::Bnk | ModKind::BinaryPatch | ModKind::ScriptInstaller => Vec::new(),
             ModKind::JsonData => Vec::new(),
         };
         created_groups.extend(installed);
@@ -515,6 +517,7 @@ pub fn preview_apply(
                     ModKind::Language => {
                         is_dir_backed && record.language.as_deref() == selected_language
                     }
+                    ModKind::Asi | ModKind::Bnk | ModKind::BinaryPatch | ModKind::ScriptInstaller => false,
                     ModKind::JsonData => false,
                 }
         })
@@ -802,11 +805,14 @@ pub fn repack_xml_entry(
         .ok_or_else(|| AppError::NotFound(format!("Virtual file not found: {virtual_path}")))?;
 
     let plaintext = fs::read(modified_path)?;
-    let mut payload = if info.record.compression_type() == 2 {
-        block::compress(&plaintext)
-    } else {
-        plaintext.clone()
-    };
+    let mut payload = build_xml_payload_with_fit(
+        &plaintext,
+        &info.filename,
+        info.record.compression_type() == 2,
+        info.record.encrypted(&info.filename),
+        info.record.comp_size as usize,
+        info.record.decomp_size as usize,
+    )?;
     if info.record.encrypted(&info.filename) {
         payload = xml_crypt(&payload, &info.filename)?;
     }
@@ -847,6 +853,88 @@ pub fn repack_xml_entry(
         patched_in_place,
         output_path: written_output,
     })
+}
+
+fn build_xml_payload_with_fit(
+    plaintext: &[u8],
+    filename: &str,
+    compressed: bool,
+    encrypted: bool,
+    target_comp_size: usize,
+    target_decomp_size: usize,
+) -> AppResult<Vec<u8>> {
+    let working = pad_or_trim_xml_plaintext(plaintext, target_decomp_size);
+    let build = |data: &[u8]| -> AppResult<Vec<u8>> {
+        let mut payload = if compressed {
+            block::compress(data)
+        } else {
+            data.to_vec()
+        };
+        if encrypted {
+            payload = xml_crypt(&payload, filename)?;
+        }
+        Ok(payload)
+    };
+
+    let payload = build(&working)?;
+    if payload.len() == target_comp_size {
+        return Ok(payload);
+    }
+
+    if compressed {
+        if payload.len() < target_comp_size {
+            for step in 1..=256usize {
+                let mut candidate = working.clone();
+                candidate.extend(std::iter::repeat_n(b' ', step));
+                candidate = pad_or_trim_xml_plaintext(&candidate, target_decomp_size);
+                let payload = build(&candidate)?;
+                if payload.len() == target_comp_size {
+                    return Ok(payload);
+                }
+            }
+        } else {
+            let mut candidate = working.clone();
+            trim_xml_plaintext(&mut candidate, target_decomp_size);
+            let payload = build(&candidate)?;
+            if payload.len() == target_comp_size {
+                return Ok(payload);
+            }
+        }
+    }
+
+    Ok(payload)
+}
+
+fn pad_or_trim_xml_plaintext(data: &[u8], target_decomp_size: usize) -> Vec<u8> {
+    let mut out = data.to_vec();
+    if out.len() > target_decomp_size {
+        out.truncate(target_decomp_size);
+    }
+    if out.len() < target_decomp_size {
+        out.extend(std::iter::repeat_n(b' ', target_decomp_size - out.len()));
+    }
+    out
+}
+
+fn trim_xml_plaintext(data: &mut Vec<u8>, target_decomp_size: usize) {
+    while data.len() > target_decomp_size {
+        if let Some(pos) = data.windows(4).rposition(|window| window == b"<!--") {
+            if let Some(end_rel) = data[pos..].windows(3).position(|window| window == b"-->") {
+                let end = pos + end_rel + 3;
+                data.drain(pos..end);
+                continue;
+            }
+        }
+        if let Some(pos) = data.iter().rposition(|byte| matches!(byte, b' ' | b'\n' | b'\r' | b'\t')) {
+            data.remove(pos);
+        } else {
+            data.truncate(target_decomp_size);
+            break;
+        }
+    }
+    if data.len() < target_decomp_size {
+        data.extend(std::iter::repeat_n(b' ', target_decomp_size - data.len()));
+    }
 }
 
 fn load_group_indexes<'a>(
@@ -1707,6 +1795,14 @@ mod tests {
         let group_dir = sandbox.packages_dir.join(&result.created_groups[0]);
         assert!(group_dir.join("0.paz").is_file());
         assert!(group_dir.join("0.pamt").is_file());
+    }
+
+    #[test]
+    fn xml_fit_builder_hits_target_decompressed_size() {
+        let plaintext = b"<root><!-- comment --><value>123</value></root>";
+        let payload = build_xml_payload_with_fit(plaintext, "example.xml", true, false, 64, 80).unwrap();
+        let decompressed = lz4_flex::block::decompress(&payload, 80).unwrap();
+        assert_eq!(decompressed.len(), 80);
     }
 
     struct Sandbox {

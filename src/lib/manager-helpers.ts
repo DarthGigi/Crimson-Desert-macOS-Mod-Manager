@@ -13,6 +13,10 @@ export function modKindLabel(modKind: ModKind) {
 	if (modKind === 'json_data') return 'JSON';
 	if (modKind === 'precompiled_overlay') return 'Precompiled';
 	if (modKind === 'browser_raw') return 'Browser/Raw';
+	if (modKind === 'asi') return 'ASI';
+	if (modKind === 'bnk') return 'BNK';
+	if (modKind === 'binary_patch') return 'Binary Patch';
+	if (modKind === 'script_installer') return 'Script Installer';
 	return 'Language';
 }
 
