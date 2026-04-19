@@ -688,3 +688,49 @@ pub fn merged_changes(
     }
     merged
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    const DOWNLOADED_MODS_DIR: &str = "/Users/gigi/Downloads/CD Mods";
+
+    #[test]
+    fn detects_real_downloaded_mod_kinds() {
+        let json_mod = Path::new(DOWNLOADED_MODS_DIR)
+            .join("stamina_json_v1.02.00")
+            .join("stamina_v1.02.00_infinite.json");
+        let precompiled_mod = Path::new(DOWNLOADED_MODS_DIR).join("item_price_display");
+        let browser_raw_mod = Path::new(DOWNLOADED_MODS_DIR).join("Better_Inventory_UI_Compatible");
+
+        assert_eq!(detect_import_kind(&json_mod).unwrap(), ModKind::JsonData);
+        assert_eq!(detect_import_kind(&precompiled_mod).unwrap(), ModKind::PrecompiledOverlay);
+        assert_eq!(detect_import_kind(&browser_raw_mod).unwrap(), ModKind::BrowserRaw);
+    }
+
+    #[test]
+    fn scans_downloaded_mods_root_and_finds_all_supported_kinds() {
+        let results = scan_mod_folder(Path::new(DOWNLOADED_MODS_DIR), None).unwrap();
+
+        assert!(results.iter().any(|result| {
+            result.mod_kind == ModKind::JsonData && result.file_name == "stamina_v1.02.00_infinite.json"
+        }));
+        assert!(results.iter().any(|result| {
+            result.mod_kind == ModKind::PrecompiledOverlay && result.file_name == "item_price_display"
+        }));
+        assert!(results.iter().any(|result| {
+            result.mod_kind == ModKind::BrowserRaw && result.file_name == "Better_Inventory_UI_Compatible"
+        }));
+    }
+
+    #[test]
+    fn browser_raw_manifest_uses_files_dir() {
+        let browser_raw_mod = Path::new(DOWNLOADED_MODS_DIR).join("Better_Inventory_UI_Compatible");
+        let record = inspect_browser_raw_dir(&browser_raw_mod).unwrap();
+
+        assert_eq!(record.mod_kind, ModKind::BrowserRaw);
+        assert_eq!(record.name, "Better Inventory UI compatible with BTM");
+        assert!(record.target_files.iter().any(|group| group == "0012"));
+        assert!(record.change_count > 0);
+    }
+}
