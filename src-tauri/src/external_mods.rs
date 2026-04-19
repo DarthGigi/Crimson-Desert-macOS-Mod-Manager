@@ -217,6 +217,7 @@ pub fn apply_binary_patch(
     record: &ModRecord,
     target_file: &Path,
     output_file: &Path,
+    bundled_xdelta3_path: Option<&Path>,
 ) -> AppResult<()> {
 	let patch_file = first_matching_file(Path::new(&record.library_path), &["bsdiff", "xdelta"])?
 		.ok_or_else(|| AppError::NotFound("No .bsdiff or .xdelta file found in the imported mod".to_string()))?;
@@ -233,7 +234,11 @@ pub fn apply_binary_patch(
 			.arg(&patch_file)
 			.status()?
 	} else {
-		let tool = ["/opt/homebrew/bin/xdelta3", "/usr/local/bin/xdelta3", "xdelta3"]
+        let tool = bundled_xdelta3_path
+            .filter(|path| path.is_file())
+            .map(PathBuf::from)
+            .or_else(|| {
+                ["/opt/homebrew/bin/xdelta3", "/usr/local/bin/xdelta3", "xdelta3"]
 			.into_iter()
 			.find(|tool| {
 				if tool.contains('/') {
@@ -241,9 +246,11 @@ pub fn apply_binary_patch(
 				} else {
 					Command::new(tool).arg("-V").output().is_ok()
 				}
+            })
+			.map(PathBuf::from)
 			})
 			.ok_or_else(|| AppError::Other("xdelta3 is not available on this system".to_string()))?;
-		Command::new(tool)
+        Command::new(tool)
 			.arg("-d")
 			.arg("-s")
 			.arg(target_file)

@@ -31,7 +31,23 @@
     "longDescription": "A macOS-native mod manager for Crimson Desert with support for JSON patch mods, precompiled overlays, browser/raw mods, archive imports, PATHC workflows, recovery tools, and advanced extraction utilities.",
     "resources": ["binaries/7z"],
     "macOS": {
-      "minimumSystemVersion": "15.0"
+      "minimumSystemVersion": "15.0",
+      "signingIdentity": "-",
+      "dmg": {
+        "background": "./icons/background.jpg",
+        "windowSize": {
+          "width": 960,
+          "height": 540
+        },
+        "appPosition": {
+          "x": 260,
+          "y": 270
+        },
+        "applicationFolderPosition": {
+          "x": 700,
+          "y": 270
+        }
+      }
     },
     "icon": [
       "icons/32x32.png",

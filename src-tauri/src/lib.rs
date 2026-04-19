@@ -38,6 +38,7 @@ const SETTINGS_ISOLATION_SESSION: &str = "problem_mod_isolation_session";
 struct AppState {
     app_data_dir: PathBuf,
     bundled_7z_path: Option<PathBuf>,
+    bundled_xdelta3_path: Option<PathBuf>,
     operation_lock: Mutex<()>,
 }
 
@@ -67,6 +68,12 @@ fn app_state(app: &AppHandle) -> Result<AppState, AppError> {
             .resource_dir()
             .ok()
             .map(|dir| dir.join("binaries").join("7z"))
+            .filter(|path| path.is_file()),
+        bundled_xdelta3_path: app
+            .path()
+            .resource_dir()
+            .ok()
+            .map(|dir| dir.join("binaries").join("xdelta3"))
             .filter(|path| path.is_file()),
         operation_lock: Mutex::new(()),
     })
@@ -535,7 +542,13 @@ fn apply_binary_patch_command(
     if record.mod_kind != ModKind::BinaryPatch {
         return Err(ErrorPayload { message: "Selected mod is not a binary patch mod.".to_string() });
     }
-    external_mods::apply_binary_patch(&record, Path::new(&target_file), Path::new(&output_file)).map_err(ErrorPayload::from)?;
+    external_mods::apply_binary_patch(
+        &record,
+        Path::new(&target_file),
+        Path::new(&output_file),
+        state.bundled_xdelta3_path.as_deref(),
+    )
+    .map_err(ErrorPayload::from)?;
     insert_history(
         &connection,
         "apply_binary_patch",
