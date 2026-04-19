@@ -1,17 +1,18 @@
 <script lang="ts">
-	import { onMount } from 'svelte';
-	import { open } from '@tauri-apps/plugin-dialog';
-	import { ArrowDownUp, FolderSearch, HardDriveDownload, Info } from '@lucide/svelte';
 	import * as Alert from '$lib/components/ui/alert';
 	import { Badge } from '$lib/components/ui/badge';
 	import { Button } from '$lib/components/ui/button';
 	import * as Card from '$lib/components/ui/card';
 	import * as Collapsible from '$lib/components/ui/collapsible';
 	import * as Empty from '$lib/components/ui/empty';
-	import { Separator } from '$lib/components/ui/separator';
 	import * as ScrollArea from '$lib/components/ui/scroll-area';
-	import { manager } from '$lib/manager-state.svelte';
+	import { Separator } from '$lib/components/ui/separator';
 	import type { ScanResult } from '$lib/desktop-api';
+	import { manager } from '$lib/manager-state.svelte';
+	import { ArrowDownUp, FolderSearch, HardDriveDownload, Info } from '@lucide/svelte';
+	import { open } from '@tauri-apps/plugin-dialog';
+	import { onMount } from 'svelte';
+	import { SvelteMap } from 'svelte/reactivity';
 
 	let importSourcePath = $state('');
 	let scanDetailsOpen = $state<Record<string, boolean>>({});
@@ -59,7 +60,7 @@
 	}
 
 	function buildVariantGroups(results: ScanResult[]): ScanVariantGroup[] {
-		const buckets = new Map<string, ScanResult[]>();
+		const buckets = new SvelteMap<string, ScanResult[]>();
 		for (const result of results) {
 			const key = `${parentDirectory(result.path)}::${result.modKind}`;
 			const bucket = buckets.get(key) ?? [];

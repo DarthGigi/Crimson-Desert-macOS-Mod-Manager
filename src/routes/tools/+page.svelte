@@ -1,15 +1,14 @@
 <script lang="ts">
-	import { onMount } from 'svelte';
-	import { open } from '@tauri-apps/plugin-dialog';
-	import { AlertCircle, Gamepad2, RefreshCw, Sparkles, Wrench } from '@lucide/svelte';
 	import * as Alert from '$lib/components/ui/alert';
+	import { Badge } from '$lib/components/ui/badge';
 	import { Button } from '$lib/components/ui/button';
 	import * as Card from '$lib/components/ui/card';
 	import { Input } from '$lib/components/ui/input';
 	import { Label } from '$lib/components/ui/label';
-	import * as Empty from '$lib/components/ui/empty';
-	import { Badge } from '$lib/components/ui/badge';
 	import { manager } from '$lib/manager-state.svelte';
+	import { AlertCircle, Gamepad2, RefreshCw, Sparkles, Wrench } from '@lucide/svelte';
+	import { open } from '@tauri-apps/plugin-dialog';
+	import { onMount } from 'svelte';
 
 	let gamePathInput = $state('');
 	let reportOutputPath = $state('');

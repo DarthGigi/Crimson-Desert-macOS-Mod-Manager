@@ -8,7 +8,8 @@ import {
 	Package,
 	Settings2,
 	Sparkles,
-	Wrench
+	Wrench,
+	type Icon as IconType
 } from '@lucide/svelte';
 
 export type AppSectionId =
@@ -29,7 +30,7 @@ export type AppSection = {
 	href: string;
 	label: string;
 	description: string;
-	icon: any;
+	icon: typeof IconType;
 	badge?: string;
 };
 
