@@ -4,7 +4,7 @@ use std::path::{Path, PathBuf};
 use rusqlite::{params, Connection, OptionalExtension};
 
 use crate::error::{AppError, AppResult};
-use crate::models::ModRecord;
+use crate::models::{ModKind, ModRecord};
 use crate::util::{bool_to_int, int_to_bool, now_iso_string};
 
 pub const DATABASE_NAME: &str = "app.db";
@@ -33,11 +33,15 @@ pub fn connect(app_data_dir: &Path) -> AppResult<Connection> {
 
 		 CREATE TABLE IF NOT EXISTS mods (
 		   id TEXT PRIMARY KEY,
+		   mod_kind TEXT NOT NULL DEFAULT 'json_data',
 		   name TEXT NOT NULL,
 		   description TEXT,
 		   file_name TEXT NOT NULL,
 		   source_path TEXT,
 		   library_path TEXT NOT NULL UNIQUE,
+		   load_order INTEGER NOT NULL DEFAULT 0,
+		   language TEXT,
+		   install_group TEXT,
 		   patch_count INTEGER NOT NULL,
 		   change_count INTEGER NOT NULL,
 		   target_files_json TEXT NOT NULL,
@@ -53,9 +57,49 @@ pub fn connect(app_data_dir: &Path) -> AppResult<Connection> {
 		   message TEXT NOT NULL,
 		   details_json TEXT,
 		   created_at TEXT NOT NULL
+		 );
+
+		 CREATE TABLE IF NOT EXISTS managed_groups (
+		   group_name TEXT PRIMARY KEY,
+		   purpose TEXT NOT NULL,
+		   source_mod_id TEXT,
+		   created_at TEXT NOT NULL
 		 );",
     )?;
+
+    ensure_column(
+        &connection,
+        "mods",
+        "mod_kind",
+        "TEXT NOT NULL DEFAULT 'json_data'",
+    )?;
+    ensure_column(
+        &connection,
+        "mods",
+        "load_order",
+        "INTEGER NOT NULL DEFAULT 0",
+    )?;
+    ensure_column(&connection, "mods", "language", "TEXT")?;
+    ensure_column(&connection, "mods", "install_group", "TEXT")?;
+
     Ok(connection)
+}
+
+fn ensure_column(connection: &Connection, table: &str, column: &str, definition: &str) -> AppResult<()> {
+    let mut statement = connection.prepare(&format!("PRAGMA table_info({table})"))?;
+    let columns = statement.query_map([], |row| row.get::<_, String>(1))?;
+
+    for existing in columns {
+        if existing? == column {
+            return Ok(());
+        }
+    }
+
+    connection.execute(
+        &format!("ALTER TABLE {table} ADD COLUMN {column} {definition}"),
+        [],
+    )?;
+    Ok(())
 }
 
 pub fn set_setting(connection: &Connection, key: &str, value: &str) -> AppResult<()> {
@@ -97,15 +141,20 @@ pub fn upsert_mod(connection: &Connection, record: &ModRecord) -> AppResult<()> 
     let target_files = serde_json::to_string(&record.target_files)?;
     connection.execute(
         "INSERT INTO mods(
-		  id, name, description, file_name, source_path, library_path,
-		  patch_count, change_count, target_files_json, enabled, imported_at, updated_at
-		) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12)
+		  id, mod_kind, name, description, file_name, source_path, library_path,
+		  load_order, language, install_group, patch_count, change_count,
+		  target_files_json, enabled, imported_at, updated_at
+		) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16)
 		ON CONFLICT(id) DO UPDATE SET
+		  mod_kind = excluded.mod_kind,
 		  name = excluded.name,
 		  description = excluded.description,
 		  file_name = excluded.file_name,
 		  source_path = excluded.source_path,
 		  library_path = excluded.library_path,
+		  load_order = excluded.load_order,
+		  language = excluded.language,
+		  install_group = excluded.install_group,
 		  patch_count = excluded.patch_count,
 		  change_count = excluded.change_count,
 		  target_files_json = excluded.target_files_json,
@@ -113,11 +162,15 @@ pub fn upsert_mod(connection: &Connection, record: &ModRecord) -> AppResult<()> 
 		  updated_at = excluded.updated_at",
         params![
             record.id,
+            record.mod_kind.as_str(),
             record.name,
             record.description,
             record.file_name,
             record.source_path,
             record.library_path,
+            record.load_order,
+            record.language,
+            record.install_group,
             record.patch_count as i64,
             record.change_count as i64,
             target_files,
@@ -127,6 +180,14 @@ pub fn upsert_mod(connection: &Connection, record: &ModRecord) -> AppResult<()> 
         ],
     )?;
     Ok(())
+}
+
+pub fn next_load_order(connection: &Connection) -> AppResult<i64> {
+    let max: Option<i64> = connection
+        .query_row("SELECT MAX(load_order) FROM mods", [], |row| row.get(0))
+        .optional()?
+        .flatten();
+    Ok(max.unwrap_or(-1) + 1)
 }
 
 pub fn update_mod_enabled(connection: &Connection, mod_id: &str, enabled: bool) -> AppResult<()> {
@@ -152,36 +213,50 @@ pub fn disable_all_mods(connection: &Connection) -> AppResult<()> {
 
 pub fn list_mods(connection: &Connection) -> AppResult<Vec<ModRecord>> {
     let mut statement = connection.prepare(
-        "SELECT id, name, description, file_name, source_path, library_path, enabled,
+		"SELECT id, mod_kind, name, description, file_name, source_path, library_path,
+		        enabled, load_order, language, install_group,
 		        patch_count, change_count, target_files_json, imported_at, updated_at
 		 FROM mods
-		 ORDER BY imported_at DESC, file_name ASC",
+		 ORDER BY enabled DESC, load_order ASC, imported_at DESC, file_name ASC",
     )?;
 
     let rows = statement.query_map([], |row| {
-        let target_files_json: String = row.get(9)?;
+        let target_files_json: String = row.get(13)?;
         let target_files: Vec<String> =
             serde_json::from_str(&target_files_json).map_err(|err| {
                 rusqlite::Error::FromSqlConversionFailure(
-                    9,
+                    13,
                     rusqlite::types::Type::Text,
                     Box::new(err),
                 )
             })?;
 
+        let mod_kind_raw: String = row.get(1)?;
+        let mod_kind = ModKind::from_str(&mod_kind_raw).ok_or_else(|| {
+            rusqlite::Error::FromSqlConversionFailure(
+                1,
+                rusqlite::types::Type::Text,
+                Box::new(AppError::Other(format!("Unknown mod kind: {mod_kind_raw}"))),
+            )
+        })?;
+
         Ok(ModRecord {
             id: row.get(0)?,
-            name: row.get(1)?,
-            description: row.get(2)?,
-            file_name: row.get(3)?,
-            source_path: row.get(4)?,
-            library_path: row.get(5)?,
-            enabled: int_to_bool(row.get::<_, i64>(6)?),
-            patch_count: row.get::<_, i64>(7)? as usize,
-            change_count: row.get::<_, i64>(8)? as usize,
+            mod_kind,
+            name: row.get(2)?,
+            description: row.get(3)?,
+            file_name: row.get(4)?,
+            source_path: row.get(5)?,
+            library_path: row.get(6)?,
+            enabled: int_to_bool(row.get::<_, i64>(7)?),
+            load_order: row.get(8)?,
+            language: row.get(9)?,
+            install_group: row.get(10)?,
+            patch_count: row.get::<_, i64>(11)? as usize,
+            change_count: row.get::<_, i64>(12)? as usize,
             target_files,
-            imported_at: row.get(10)?,
-            updated_at: row.get(11)?,
+            imported_at: row.get(14)?,
+            updated_at: row.get(15)?,
         })
     })?;
 

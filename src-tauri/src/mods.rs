@@ -4,7 +4,7 @@ use std::path::{Path, PathBuf};
 
 use crate::db;
 use crate::error::{AppError, AppResult};
-use crate::models::{ModManifest, ModRecord, ScanResult};
+use crate::models::{ModKind, ModManifest, ModRecord, ScanResult};
 use crate::patcher::{build_file_index, read_pamt_raw, resolve_game_file};
 use crate::util::{now_iso_string, sanitize_file_name, unique_id};
 
@@ -76,6 +76,8 @@ pub fn import_mod(
     connection: &rusqlite::Connection,
     source_path: &Path,
     enable: bool,
+    mod_kind: ModKind,
+    language: Option<String>,
 ) -> AppResult<ModRecord> {
     let manifest = load_manifest(source_path)?;
     let description = manifest.description.clone();
@@ -97,14 +99,19 @@ pub fn import_mod(
     fs::copy(source_path, &library_path)?;
 
     let now = now_iso_string();
+    let load_order = db::next_load_order(connection)?;
     let record = ModRecord {
         id: mod_id,
+        mod_kind,
         name: manifest.name,
         description,
         file_name,
         source_path: Some(source_path.display().to_string()),
         library_path: library_path.display().to_string(),
         enabled: enable,
+        load_order,
+        language,
+        install_group: None,
         patch_count,
         change_count,
         target_files,
@@ -132,10 +139,14 @@ pub fn load_manifest(path: &Path) -> AppResult<ModManifest> {
 
 pub fn load_enabled_manifests(records: &[ModRecord]) -> AppResult<Vec<(ModRecord, ModManifest)>> {
     let mut mods = Vec::new();
-    for record in records.iter().filter(|record| record.enabled) {
+    for record in records
+        .iter()
+        .filter(|record| record.enabled && record.mod_kind == ModKind::JsonData)
+    {
         let manifest = load_manifest(Path::new(&record.library_path))?;
         mods.push((record.clone(), manifest));
     }
+    mods.sort_by_key(|(record, _)| record.load_order);
     Ok(mods)
 }
 
@@ -188,7 +199,7 @@ pub fn merged_changes(
                 .entry(patch.game_file.clone())
                 .or_insert_with(Vec::new);
             for change in &patch.changes {
-                entry.push((record.name.clone(), change.clone()));
+                entry.push((format!("{}#{}", record.name, record.load_order), change.clone()));
             }
         }
     }

@@ -1,5 +1,32 @@
 use serde::{Deserialize, Serialize};
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum ModKind {
+    JsonData,
+    PrecompiledOverlay,
+    Language,
+}
+
+impl ModKind {
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::JsonData => "json_data",
+            Self::PrecompiledOverlay => "precompiled_overlay",
+            Self::Language => "language",
+        }
+    }
+
+    pub fn from_str(value: &str) -> Option<Self> {
+        match value {
+            "json_data" => Some(Self::JsonData),
+            "precompiled_overlay" => Some(Self::PrecompiledOverlay),
+            "language" => Some(Self::Language),
+            _ => None,
+        }
+    }
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct ModChange {
@@ -41,12 +68,16 @@ pub struct GameInstallInfo {
 #[serde(rename_all = "camelCase")]
 pub struct ModRecord {
     pub id: String,
+    pub mod_kind: ModKind,
     pub name: String,
     pub description: Option<String>,
     pub file_name: String,
     pub source_path: Option<String>,
     pub library_path: String,
     pub enabled: bool,
+    pub load_order: i64,
+    pub language: Option<String>,
+    pub install_group: Option<String>,
     pub patch_count: usize,
     pub change_count: usize,
     pub target_files: Vec<String>,

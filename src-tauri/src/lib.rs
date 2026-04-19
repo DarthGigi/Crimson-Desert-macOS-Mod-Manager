@@ -15,7 +15,7 @@ use game::{
     detect_packages_dir, inspect_game_install, launch_game, resolve_to_packages_dir, LaunchResult,
     MOD_GROUP,
 };
-use models::{ApplyResult, DashboardData, GameInstallInfo, ModRecord, ScanResult, StatusSummary};
+use models::{ApplyResult, DashboardData, GameInstallInfo, ModKind, ModRecord, ScanResult, StatusSummary};
 use tauri::{AppHandle, Manager, State};
 
 const SETTINGS_GAME_PATH: &str = "game_packages_path";
@@ -146,8 +146,15 @@ fn import_mod_variant_command(
     state: State<'_, AppState>,
 ) -> Result<DashboardData, ErrorPayload> {
     let connection = state.connection().map_err(ErrorPayload::from)?;
-    let record = mods::import_mod(&state.app_data_dir, &connection, Path::new(&path), enable)
-        .map_err(ErrorPayload::from)?;
+    let record = mods::import_mod(
+        &state.app_data_dir,
+        &connection,
+        Path::new(&path),
+        enable,
+        ModKind::JsonData,
+        None,
+    )
+    .map_err(ErrorPayload::from)?;
     insert_history(
         &connection,
         "import",
