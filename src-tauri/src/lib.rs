@@ -224,12 +224,24 @@ fn set_mod_classification_command(
     state: State<'_, AppState>,
 ) -> Result<DashboardData, ErrorPayload> {
     let connection = state.connection().map_err(ErrorPayload::from)?;
+    let mods = list_mods(&connection).map_err(ErrorPayload::from)?;
+    let existing = mods
+        .iter()
+        .find(|record| record.id == mod_id)
+        .ok_or_else(|| ErrorPayload {
+            message: format!("No mod found for id {mod_id}"),
+        })?;
+    let resolved_kind = if mod_kind == ModKind::PrecompiledOverlay && Path::new(&existing.library_path).is_dir() {
+        mods::detect_import_kind(Path::new(&existing.library_path)).unwrap_or(mod_kind)
+    } else {
+        mod_kind
+    };
     let normalized_language = if mod_kind == ModKind::Language {
         language.filter(|value| !value.trim().is_empty())
     } else {
         None
     };
-    update_mod_classification(&connection, &mod_id, mod_kind, normalized_language.as_deref())
+    update_mod_classification(&connection, &mod_id, resolved_kind, normalized_language.as_deref())
         .map_err(ErrorPayload::from)?;
     insert_history(
         &connection,

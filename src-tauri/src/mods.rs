@@ -32,6 +32,10 @@ pub fn scan_mod_folder(folder: &Path, packages_dir: Option<&Path>) -> AppResult<
     collect_precompiled_dirs(folder, &mut precompiled_dirs)?;
     precompiled_dirs.sort();
 
+    let mut browser_raw_dirs = Vec::new();
+    collect_browser_raw_dirs(folder, &mut browser_raw_dirs)?;
+    browser_raw_dirs.sort();
+
     let indexes = if let Some(packages_dir) = packages_dir {
         let pamt_info = read_pamt_raw(&packages_dir.join("0008").join("0.pamt"))?;
         Some(build_file_index(&pamt_info))
@@ -105,13 +109,41 @@ pub fn scan_mod_folder(folder: &Path, packages_dir: Option<&Path>) -> AppResult<
         });
     }
 
+    for dir in browser_raw_dirs {
+        let record = inspect_browser_raw_dir(&dir)?;
+        results.push(ScanResult {
+            path: dir.display().to_string(),
+            mod_kind: ModKind::BrowserRaw,
+            file_name: dir
+                .file_name()
+                .unwrap_or_default()
+                .to_string_lossy()
+                .to_string(),
+            name: record.name,
+            description: record.description,
+            patch_count: record.patch_count,
+            change_count: record.change_count,
+            target_files: record.target_files,
+            resolvable_files: 0,
+            missing_files: Vec::new(),
+        });
+    }
+
     Ok(results)
 }
 
 pub fn detect_import_kind(path: &Path) -> AppResult<ModKind> {
     if path.is_dir() {
-        inspect_precompiled_dir(path)?;
-        return Ok(ModKind::PrecompiledOverlay);
+        if inspect_precompiled_dir(path).is_ok() {
+            return Ok(ModKind::PrecompiledOverlay);
+        }
+        if inspect_browser_raw_dir(path).is_ok() {
+            return Ok(ModKind::BrowserRaw);
+        }
+        return Err(AppError::InvalidMod(format!(
+            "{} is not a supported folder mod",
+            path.display()
+        )));
     }
 
     load_manifest(path)?;
@@ -158,6 +190,17 @@ pub fn import_mod(
         }
         ModKind::PrecompiledOverlay => {
             let record = inspect_precompiled_dir(source_path)?;
+            copy_dir_all(source_path, &library_path)?;
+            (
+                record.name,
+                record.description,
+                record.patch_count,
+                record.change_count,
+                record.target_files,
+            )
+        }
+        ModKind::BrowserRaw => {
+            let record = inspect_browser_raw_dir(source_path)?;
             copy_dir_all(source_path, &library_path)?;
             (
                 record.name,
@@ -250,7 +293,7 @@ pub fn load_enabled_manifests(
                         record.language.as_deref() == selected_language
                             && Path::new(&record.library_path).is_file()
                     }
-                    ModKind::PrecompiledOverlay => false,
+                    ModKind::PrecompiledOverlay | ModKind::BrowserRaw => false,
                 }
         })
     {
@@ -324,6 +367,23 @@ fn collect_precompiled_dirs(root: &Path, output: &mut Vec<PathBuf>) -> AppResult
     Ok(())
 }
 
+fn collect_browser_raw_dirs(root: &Path, output: &mut Vec<PathBuf>) -> AppResult<()> {
+    if is_browser_raw_dir(root) {
+        output.push(root.to_path_buf());
+        return Ok(());
+    }
+
+    for entry in fs::read_dir(root)? {
+        let entry = entry?;
+        let path = entry.path();
+        if path.is_dir() {
+            collect_browser_raw_dirs(&path, output)?;
+        }
+    }
+
+    Ok(())
+}
+
 fn is_precompiled_dir(root: &Path) -> bool {
     let Ok(entries) = fs::read_dir(root) else {
         return false;
@@ -338,6 +398,26 @@ fn is_precompiled_dir(root: &Path) -> bool {
                 .is_some_and(|name| name.len() == 4 && name.chars().all(|ch| ch.is_ascii_digit()))
             && path.join("0.pamt").is_file()
             && path.join("0.paz").is_file()
+    })
+}
+
+fn is_browser_raw_dir(root: &Path) -> bool {
+    let Some(files_dir) = browser_files_dir(root) else {
+        return false;
+    };
+
+    let Ok(entries) = fs::read_dir(&files_dir) else {
+        return false;
+    };
+
+    entries.flatten().any(|entry| {
+        let path = entry.path();
+        path.is_dir()
+            && path
+                .file_name()
+                .and_then(|value| value.to_str())
+                .is_some_and(|name| name.len() == 4 && name.chars().all(|ch| ch.is_ascii_digit()))
+            && contains_any_files(&path)
     })
 }
 
@@ -382,6 +462,50 @@ fn inspect_precompiled_dir(root: &Path) -> AppResult<ModRecord> {
     })
 }
 
+fn inspect_browser_raw_dir(root: &Path) -> AppResult<ModRecord> {
+    if !is_browser_raw_dir(root) {
+        return Err(AppError::InvalidMod(format!(
+            "{} is not a browser/raw folder mod",
+            root.display()
+        )));
+    }
+
+    let files_dir = browser_files_dir(root).ok_or_else(|| {
+        AppError::InvalidMod(format!("{} does not declare a valid files dir", root.display()))
+    })?;
+    let name = read_precompiled_name(root).unwrap_or_else(|| {
+        root.file_name()
+            .unwrap_or_default()
+            .to_string_lossy()
+            .to_string()
+    });
+    let description = read_precompiled_description(root);
+    let (target_files, change_count) = list_browser_raw_groups(&files_dir)?;
+
+    Ok(ModRecord {
+        id: String::new(),
+        mod_kind: ModKind::BrowserRaw,
+        name,
+        description,
+        file_name: root
+            .file_name()
+            .unwrap_or_default()
+            .to_string_lossy()
+            .to_string(),
+        source_path: Some(root.display().to_string()),
+        library_path: root.display().to_string(),
+        enabled: false,
+        load_order: 0,
+        language: None,
+        install_group: None,
+        patch_count: target_files.len(),
+        change_count,
+        target_files,
+        imported_at: String::new(),
+        updated_at: String::new(),
+    })
+}
+
 fn read_precompiled_name(root: &Path) -> Option<String> {
     for candidate in ["modinfo.json", "manifest.json", "mod.json"] {
         let path = root.join(candidate);
@@ -405,6 +529,29 @@ fn read_precompiled_name(root: &Path) -> Option<String> {
     }
 
     None
+}
+
+fn browser_files_dir(root: &Path) -> Option<PathBuf> {
+    for candidate in ["manifest.json", "modinfo.json", "mod.json"] {
+        let path = root.join(candidate);
+        if !path.is_file() {
+            continue;
+        }
+
+        let raw = fs::read_to_string(&path).ok()?;
+        let value: Value = serde_json::from_str(&raw).ok()?;
+        let files_dir = value
+            .get("files_dir")
+            .and_then(|value| value.as_str())
+            .unwrap_or("files");
+        let candidate_dir = root.join(files_dir);
+        if candidate_dir.is_dir() {
+            return Some(candidate_dir);
+        }
+    }
+
+    let default = root.join("files");
+    default.is_dir().then_some(default)
 }
 
 fn read_precompiled_description(root: &Path) -> Option<String> {
@@ -452,6 +599,53 @@ fn list_precompiled_groups(root: &Path) -> AppResult<Vec<String>> {
     }
     groups.sort();
     Ok(groups)
+}
+
+fn list_browser_raw_groups(root: &Path) -> AppResult<(Vec<String>, usize)> {
+    let mut groups = Vec::new();
+    let mut total_files = 0usize;
+
+    for entry in fs::read_dir(root)? {
+        let entry = entry?;
+        let path = entry.path();
+        if !path.is_dir() {
+            continue;
+        }
+
+        let Some(name) = path.file_name().and_then(|value| value.to_str()) else {
+            continue;
+        };
+
+        if name.len() == 4 && name.chars().all(|ch| ch.is_ascii_digit()) {
+            let count = count_files_recursively(&path)?;
+            if count > 0 {
+                groups.push(name.to_string());
+                total_files += count;
+            }
+        }
+    }
+
+    groups.sort();
+    Ok((groups, total_files))
+}
+
+fn contains_any_files(root: &Path) -> bool {
+    count_files_recursively(root).unwrap_or(0) > 0
+}
+
+fn count_files_recursively(root: &Path) -> AppResult<usize> {
+    let mut count = 0usize;
+    for entry in fs::read_dir(root)? {
+        let entry = entry?;
+        let path = entry.path();
+        if path.is_dir() {
+            count += count_files_recursively(&path)?;
+        } else if path.is_file() {
+            count += 1;
+        }
+    }
+
+    Ok(count)
 }
 
 fn copy_dir_all(source: &Path, destination: &Path) -> AppResult<()> {

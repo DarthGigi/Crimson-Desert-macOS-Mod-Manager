@@ -9,7 +9,7 @@ export type GameInstallInfo = {
 	detected: boolean;
 };
 
-export type ModKind = 'json_data' | 'precompiled_overlay' | 'language';
+export type ModKind = 'json_data' | 'precompiled_overlay' | 'browser_raw' | 'language';
 
 export type ModRecord = {
 	id: string;

@@ -5,7 +5,7 @@ use std::path::Path;
 use lz4_flex::block;
 
 use crate::error::{AppError, AppResult};
-use crate::models::{ApplyFileResult, ApplyResult, ManagedGroupRecord, ModChange, ModRecord};
+use crate::models::{ApplyFileResult, ApplyResult, ManagedGroupRecord, ModChange, ModKind, ModRecord};
 use crate::mods::{load_enabled_manifests, merged_changes};
 use crate::util::now_iso_string;
 
@@ -74,6 +74,7 @@ pub struct OverlayFile {
     pub comp_size: usize,
     pub decomp_size: usize,
     pub paz_offset: usize,
+    pub flags: u16,
 }
 
 pub fn pa_checksum(data: &[u8]) -> u32 {
@@ -302,11 +303,9 @@ pub fn apply_mods(
             let is_dir_backed = Path::new(&record.library_path).is_dir();
             record.enabled
                 && match record.mod_kind {
-                    crate::models::ModKind::PrecompiledOverlay => is_dir_backed,
-                    crate::models::ModKind::Language => {
-                        is_dir_backed && record.language.as_deref() == selected_language
-                    }
-                    crate::models::ModKind::JsonData => false,
+                    ModKind::PrecompiledOverlay | ModKind::BrowserRaw => is_dir_backed,
+                    ModKind::Language => is_dir_backed && record.language.as_deref() == selected_language,
+                    ModKind::JsonData => false,
                 }
         })
         .cloned()
@@ -386,6 +385,7 @@ pub fn apply_mods(
             comp_size: recompressed.len(),
             decomp_size: record.decomp_size as usize,
             paz_offset,
+            flags: 0x0002,
         });
 
         file_results.push(ApplyFileResult {
@@ -428,7 +428,22 @@ pub fn apply_mods(
     }
 
     for record in &enabled_precompiled {
-        let installed = install_precompiled_mod(game_dir, &papgt_path, record, &mut next_group)?;
+        let installed = match record.mod_kind {
+            ModKind::PrecompiledOverlay => {
+                install_precompiled_mod(game_dir, &papgt_path, record, &mut next_group)?
+            }
+            ModKind::BrowserRaw => {
+                install_browser_raw_mod(game_dir, &papgt_path, record, &mut next_group)?
+            }
+            ModKind::Language => {
+                if Path::new(&record.library_path).join("files").is_dir() {
+                    install_browser_raw_mod(game_dir, &papgt_path, record, &mut next_group)?
+                } else {
+                    install_precompiled_mod(game_dir, &papgt_path, record, &mut next_group)?
+                }
+            }
+            ModKind::JsonData => Vec::new(),
+        };
         created_groups.extend(installed);
     }
 
@@ -603,6 +618,177 @@ fn install_precompiled_mod(
     Ok(created)
 }
 
+fn install_browser_raw_mod(
+    game_dir: &Path,
+    papgt_path: &Path,
+    record: &ModRecord,
+    next_group: &mut u16,
+) -> AppResult<Vec<String>> {
+    let source_root = Path::new(&record.library_path);
+    let files_dir = resolve_browser_files_dir(source_root)?;
+    let mut source_groups = Vec::new();
+
+    for entry in fs::read_dir(&files_dir)? {
+        let entry = entry?;
+        let path = entry.path();
+        if !path.is_dir() {
+            continue;
+        }
+
+        let Some(name) = path.file_name().and_then(|value| value.to_str()) else {
+            continue;
+        };
+
+        if name.len() == 4 && name.chars().all(|ch| ch.is_ascii_digit()) {
+            source_groups.push(path);
+        }
+    }
+
+    source_groups.sort();
+    if source_groups.is_empty() {
+        return Err(AppError::InvalidMod(format!(
+            "{} does not contain any browser/raw source groups",
+            record.library_path
+        )));
+    }
+
+    let mut created = Vec::new();
+    for source_group in source_groups {
+        let overlay_files = collect_loose_overlay_files(&source_group)?;
+        if overlay_files.is_empty() {
+            continue;
+        }
+
+        let target_group = format!("{:04}", *next_group);
+        *next_group += 1;
+        let target_dir = game_dir.join(&target_group);
+        fs::create_dir_all(&target_dir)?;
+
+        let (paz_bytes, pamt_bytes) = build_loose_overlay_archive(&overlay_files);
+        fs::write(target_dir.join("0.paz"), &paz_bytes)?;
+        fs::write(target_dir.join("0.pamt"), &pamt_bytes)?;
+
+        let pamt_crc = read_u32_le(&pamt_bytes, 0);
+        let new_papgt = build_papgt_with_mod(papgt_path, &target_group, pamt_crc)?;
+        fs::write(papgt_path, &new_papgt)?;
+        created.push(target_group);
+    }
+
+    Ok(created)
+}
+
+fn resolve_browser_files_dir(root: &Path) -> AppResult<std::path::PathBuf> {
+    for candidate in ["manifest.json", "modinfo.json", "mod.json"] {
+        let path = root.join(candidate);
+        if !path.is_file() {
+            continue;
+        }
+
+        let raw = fs::read_to_string(&path)?;
+        let value: serde_json::Value = serde_json::from_str(&raw)?;
+        let files_dir = value
+            .get("files_dir")
+            .and_then(|value| value.as_str())
+            .unwrap_or("files");
+        let candidate_dir = root.join(files_dir);
+        if candidate_dir.is_dir() {
+            return Ok(candidate_dir);
+        }
+    }
+
+    let default = root.join("files");
+    if default.is_dir() {
+        return Ok(default);
+    }
+
+    Err(AppError::InvalidMod(format!(
+        "{} does not contain a valid browser/raw files directory",
+        root.display()
+    )))
+}
+
+#[derive(Debug, Clone)]
+struct OverlayFileBytes {
+    dir_path: String,
+    filename: String,
+    bytes: Vec<u8>,
+    flags: u16,
+}
+
+fn collect_loose_overlay_files(root: &Path) -> AppResult<Vec<OverlayFileBytes>> {
+    let mut files = Vec::new();
+    collect_loose_overlay_files_inner(root, root, &mut files)?;
+    files.sort_by(|left, right| {
+        left.dir_path
+            .cmp(&right.dir_path)
+            .then(left.filename.cmp(&right.filename))
+    });
+    Ok(files)
+}
+
+fn collect_loose_overlay_files_inner(
+    root: &Path,
+    current: &Path,
+    output: &mut Vec<OverlayFileBytes>,
+) -> AppResult<()> {
+    for entry in fs::read_dir(current)? {
+        let entry = entry?;
+        let path = entry.path();
+        if path.is_dir() {
+            collect_loose_overlay_files_inner(root, &path, output)?;
+            continue;
+        }
+
+        let relative = path.strip_prefix(root).map_err(|err| {
+            AppError::Other(format!("Failed to derive browser/raw relative path: {err}"))
+        })?;
+        let filename = relative
+            .file_name()
+            .unwrap_or_default()
+            .to_string_lossy()
+            .to_string();
+        let dir_path = relative
+            .parent()
+            .map(|parent| parent.to_string_lossy().replace('\\', "/"))
+            .unwrap_or_default();
+        output.push(OverlayFileBytes {
+            dir_path,
+            filename,
+            bytes: fs::read(&path)?,
+            flags: 0,
+        });
+    }
+
+    Ok(())
+}
+
+fn build_loose_overlay_archive(files: &[OverlayFileBytes]) -> (Vec<u8>, Vec<u8>) {
+    let mut paz_buffer = Vec::new();
+    let mut overlay_files = Vec::new();
+
+    for file in files {
+        let paz_offset = paz_buffer.len();
+        paz_buffer.extend_from_slice(&file.bytes);
+        while paz_buffer.len() % PAZ_ALIGNMENT != 0 {
+            paz_buffer.push(0);
+        }
+
+        overlay_files.push(OverlayFile {
+            dir_path: file.dir_path.clone(),
+            filename: file.filename.clone(),
+            comp_size: file.bytes.len(),
+            decomp_size: file.bytes.len(),
+            paz_offset,
+            flags: file.flags,
+        });
+    }
+
+    let paz_crc = pa_checksum(&paz_buffer);
+    let mut pamt_data = build_multi_pamt(&overlay_files, paz_buffer.len());
+    update_pamt_paz_crc(&mut pamt_data, paz_crc);
+    (paz_buffer, pamt_data)
+}
+
 fn copy_dir_all(source: &Path, destination: &Path) -> AppResult<()> {
     fs::create_dir_all(destination)?;
 
@@ -735,7 +921,7 @@ fn build_multi_pamt(files: &[OverlayFile], paz_data_len: usize) -> Vec<u8> {
             file_records.extend_from_slice(&(file.comp_size as u32).to_le_bytes());
             file_records.extend_from_slice(&(file.decomp_size as u32).to_le_bytes());
             file_records.extend_from_slice(&0u16.to_le_bytes());
-            file_records.extend_from_slice(&0x0002u16.to_le_bytes());
+            file_records.extend_from_slice(&file.flags.to_le_bytes());
             file_index += 1;
         }
 

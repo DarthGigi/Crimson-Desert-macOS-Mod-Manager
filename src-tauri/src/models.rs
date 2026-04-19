@@ -5,6 +5,7 @@ use serde::{Deserialize, Serialize};
 pub enum ModKind {
     JsonData,
     PrecompiledOverlay,
+    BrowserRaw,
     Language,
 }
 
@@ -13,6 +14,7 @@ impl ModKind {
         match self {
             Self::JsonData => "json_data",
             Self::PrecompiledOverlay => "precompiled_overlay",
+            Self::BrowserRaw => "browser_raw",
             Self::Language => "language",
         }
     }
@@ -21,6 +23,7 @@ impl ModKind {
         match value {
             "json_data" => Some(Self::JsonData),
             "precompiled_overlay" => Some(Self::PrecompiledOverlay),
+            "browser_raw" => Some(Self::BrowserRaw),
             "language" => Some(Self::Language),
             _ => None,
         }
@@ -37,15 +40,16 @@ pub struct ModChange {
     pub label: Option<String>,
     #[serde(default)]
     pub entry: Option<String>,
-    #[serde(default)]
+    #[serde(default, alias = "rel_offset")]
     pub rel_offset: Option<usize>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct ModPatch {
+    #[serde(alias = "game_file")]
     pub game_file: String,
-    #[serde(default)]
+    #[serde(default, alias = "source_group")]
     pub source_group: Option<String>,
     pub changes: Vec<ModChange>,
 }

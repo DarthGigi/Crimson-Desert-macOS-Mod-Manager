@@ -104,7 +104,7 @@
 	});
 	const selectedLanguage = $derived(dashboard?.status.selectedLanguage ?? null);
 	const languageMods = $derived(allMods.filter((mod) => mod.modKind === 'language'));
-	const precompiledMods = $derived(allMods.filter((mod) => mod.modKind === 'precompiled_overlay'));
+	const precompiledMods = $derived(allMods.filter((mod) => mod.modKind === 'precompiled_overlay' || mod.modKind === 'browser_raw'));
 	const orderedJsonMods = $derived(
 		allMods.filter((mod) => mod.modKind === 'json_data' && mod.enabled).toSorted((left, right) => left.loadOrder - right.loadOrder)
 	);
@@ -347,10 +347,14 @@
 	function modKindLabel(modKind: ModKind) {
 		if (modKind === 'json_data') return 'JSON';
 		if (modKind === 'precompiled_overlay') return 'Precompiled';
+		if (modKind === 'browser_raw') return 'Browser/Raw';
 		return 'Language';
 	}
 
 	function fallbackKindForLanguageMod(mod: ModRecord): ModKind {
+		if (mod.libraryPath.endsWith('/files') || mod.libraryPath.includes('/files/')) {
+			return 'browser_raw';
+		}
 		return mod.targetFiles.every((target) => /^\d{4}$/.test(target)) ? 'precompiled_overlay' : 'json_data';
 	}
 
