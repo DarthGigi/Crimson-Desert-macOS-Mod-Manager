@@ -28,7 +28,6 @@ struct PathcMapEntry {
 
 #[derive(Debug, Clone)]
 struct PathcCollisionEntry {
-    path_offset: u32,
     dds_index: u32,
     m1: u32,
     m2: u32,
@@ -194,7 +193,6 @@ fn read_pathc(path: &Path) -> AppResult<PathcFile> {
         let offset = collision_table_off + index * 24;
         let path_offset = read_u32(&raw, offset)?;
         collision_entries.push(PathcCollisionEntry {
-            path_offset,
             dds_index: read_u32(&raw, offset + 4)?,
             m1: read_u32(&raw, offset + 8)?,
             m2: read_u32(&raw, offset + 12)?,
