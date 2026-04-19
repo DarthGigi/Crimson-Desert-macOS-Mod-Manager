@@ -130,9 +130,30 @@ export type PathcRepackResult = {
 	addedTemplateCount: number;
 };
 
+export type ExtractPreview = {
+	virtualPath: string;
+	sourceGroup: string;
+	resolved: boolean;
+	resolvedGameFile: string | null;
+	sourcePazIndex: number | null;
+	compressedSize: number | null;
+	decompressedSize: number | null;
+	flags: number | null;
+	reason: string | null;
+};
+
+export type ExtractResult = {
+	virtualPath: string;
+	sourceGroup: string;
+	outputPath: string;
+	decompressedSize: number;
+};
+
 export type StatusSummary = {
 	gameInstall: GameInstallInfo | null;
 	selectedLanguage: string | null;
+	recoveryPending: boolean;
+	pendingOperation: string | null;
 	overlayActive: boolean;
 	backupExists: boolean;
 	totalMods: number;
@@ -211,6 +232,10 @@ export async function resetActiveMods() {
 	return invoke<DashboardData>('reset_active_mods_command');
 }
 
+export async function fixEverything() {
+	return invoke<DashboardData>('fix_everything_command');
+}
+
 export async function launchGame() {
 	return invoke<LaunchResult>('launch_game_command');
 }
@@ -221,4 +246,12 @@ export async function getPathcSummary(path: string | null, lookups: string[]) {
 
 export async function repackPathc(path: string | null, folderPath: string) {
 	return invoke<PathcRepackResult>('repack_pathc_command', { path, folderPath });
+}
+
+export async function getVirtualFilePreview(virtualPath: string, sourceGroup: string | null) {
+	return invoke<ExtractPreview>('get_virtual_file_preview_command', { virtualPath, sourceGroup });
+}
+
+export async function extractVirtualFile(virtualPath: string, sourceGroup: string | null, outputDir: string) {
+	return invoke<ExtractResult>('extract_virtual_file_command', { virtualPath, sourceGroup, outputDir });
 }

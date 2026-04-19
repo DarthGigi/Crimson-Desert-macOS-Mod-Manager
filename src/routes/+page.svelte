@@ -27,6 +27,8 @@
 		getDashboard,
 		getModPatchSummaries,
 		getPathcSummary,
+		getVirtualFilePreview,
+		fixEverything,
 		importModVariant,
 		launchGame,
 		moveModInLoadOrder,
@@ -39,9 +41,12 @@
 		setPatchEnabled,
 		setSelectedLanguage,
 		setModEnabled,
+		extractVirtualFile,
 		type ApplyResult,
 		type ApplyPreview,
 		type DashboardData,
+		type ExtractPreview,
+		type ExtractResult,
 		type ModKind,
 		type ModPatchSummary,
 		type ModRecord,
@@ -73,6 +78,8 @@
 	let applyPreview = $state<ApplyPreview | null>(null);
 	let pathcSummary = $state<PathcSummary | null>(null);
 	let pathcResult = $state<PathcRepackResult | null>(null);
+	let extractPreview = $state<ExtractPreview | null>(null);
+	let extractResult = $state<ExtractResult | null>(null);
 	let selectedPatchModId = $state<string | null>(null);
 	let patchSummaries = $state<ModPatchSummary[]>([]);
 	let scanResults = $state<ScanResult[]>([]);
@@ -81,6 +88,9 @@
 	let pathcPathInput = $state('');
 	let pathcLookupInput = $state('/ui/texture/cd_itemslot_00.dds');
 	let pathcFolderInput = $state('');
+	let extractVirtualPathInput = $state('character/player/playeractiongraph_main.xml');
+	let extractSourceGroupInput = $state('0008');
+	let extractOutputDirInput = $state('');
 	let scanFolderPath = $state('');
 	let search = $state('');
 	let filter = $state<Filter>('all');
@@ -98,8 +108,10 @@
 		patches: false,
 		pathc: false,
 		repackingPathc: false,
+		extracting: false,
 		restoring: false,
 		resetting: false,
+		fixing: false,
 		launching: false,
 		toggling: ''
 	});
@@ -108,6 +120,8 @@
 	const install = $derived(dashboard?.status.gameInstall ?? null);
 	const overlayActive = $derived(dashboard?.status.overlayActive ?? false);
 	const backupExists = $derived(dashboard?.status.backupExists ?? false);
+	const recoveryPending = $derived(dashboard?.status.recoveryPending ?? false);
+	const pendingOperation = $derived(dashboard?.status.pendingOperation ?? null);
 	const enabledCount = $derived(dashboard?.status.enabledMods ?? 0);
 	const totalCount = $derived(dashboard?.status.totalMods ?? 0);
 	const disabledCount = $derived(dashboard?.status.disabledMods ?? 0);
@@ -443,6 +457,21 @@
 		}
 	}
 
+	async function runFixEverything() {
+		busy.fixing = true;
+		clearMessage();
+		try {
+			dashboard = await fixEverything();
+			lastApplyResult = null;
+			applyPreview = null;
+			toast.success('Reset the manager state and restored vanilla files.');
+		} catch (error) {
+			setError(error, 'Could not run Fix Everything');
+		} finally {
+			busy.fixing = false;
+		}
+	}
+
 	async function runPathcRepack() {
 		if (!pathcFolderInput.trim()) {
 			toast.info('Choose a DDS folder first.');
@@ -459,6 +488,59 @@
 			setError(error, 'Could not repack PATHC');
 		} finally {
 			busy.repackingPathc = false;
+		}
+	}
+
+	async function chooseExtractOutputDir() {
+		const selected = await open({
+			multiple: false,
+			directory: true,
+			defaultPath: extractOutputDirInput || undefined,
+			title: 'Choose an output folder for extracted files'
+		});
+
+		if (typeof selected === 'string') {
+			extractOutputDirInput = selected;
+		}
+	}
+
+	async function refreshExtractPreview() {
+		if (!extractVirtualPathInput.trim()) {
+			extractPreview = null;
+			return;
+		}
+
+		busy.extracting = true;
+		try {
+			extractPreview = await getVirtualFilePreview(extractVirtualPathInput.trim(), extractSourceGroupInput.trim() || null);
+		} catch (error) {
+			extractPreview = null;
+			setError(error, 'Could not inspect virtual file');
+		} finally {
+			busy.extracting = false;
+		}
+	}
+
+	async function runExtractVirtualFile() {
+		if (!extractOutputDirInput.trim()) {
+			toast.info('Choose an output folder first.');
+			return;
+		}
+
+		busy.extracting = true;
+		clearMessage();
+		try {
+			extractResult = await extractVirtualFile(
+				extractVirtualPathInput.trim(),
+				extractSourceGroupInput.trim() || null,
+				extractOutputDirInput.trim()
+			);
+			await refreshExtractPreview();
+			toast.success(`Extracted ${extractResult.virtualPath}.`);
+		} catch (error) {
+			setError(error, 'Could not extract virtual file');
+		} finally {
+			busy.extracting = false;
 		}
 	}
 
@@ -582,13 +664,23 @@
 				<Badge variant={backupExists ? 'outline' : 'secondary'}>{backupExists ? 'Backup present' : 'No backup yet'}</Badge>
 			</div>
 
-			{#if message}
-				<Alert.Root variant={message.kind === 'error' ? 'destructive' : 'default'}>
-					<AlertCircle class="size-4" />
-					<Alert.Title>{message.title}</Alert.Title>
-					<Alert.Description>{message.message}</Alert.Description>
-				</Alert.Root>
-			{/if}
+		{#if message}
+			<Alert.Root variant={message.kind === 'error' ? 'destructive' : 'default'}>
+				<AlertCircle class="size-4" />
+				<Alert.Title>{message.title}</Alert.Title>
+				<Alert.Description>{message.message}</Alert.Description>
+			</Alert.Root>
+		{/if}
+
+		{#if recoveryPending}
+			<Alert.Root variant="destructive">
+				<AlertCircle class="size-4" />
+				<Alert.Title>Recovery recommended</Alert.Title>
+				<Alert.Description>
+					The last operation may have been interrupted{#if pendingOperation} during `{pendingOperation}`{/if}. Run `Fix Everything` in Tools to restore a clean manager state.
+				</Alert.Description>
+			</Alert.Root>
+		{/if}
 
 			<Card.Root>
 				<Card.Header>
@@ -1098,8 +1190,12 @@
 						<Button variant="outline" disabled={busy.detectingGame} onclick={detectInstall}>Detect</Button>
 						<Button disabled={busy.settingGame} onclick={saveGamePath}>Save Path</Button>
 						<Button variant="outline" disabled={!install || busy.launching} onclick={runLaunch}><Wrench class="size-4" /> Start game</Button>
+						<Button variant="destructive" disabled={busy.fixing} onclick={runFixEverything}>{busy.fixing ? 'Fixing...' : 'Fix Everything'}</Button>
 					</div>
 					<p class="text-muted-foreground text-sm break-all">{install?.packagesPath ?? 'Not configured yet'}</p>
+					{#if recoveryPending}
+						<p class="text-destructive text-xs">Pending recovery marker{#if pendingOperation}: {pendingOperation}{/if}</p>
+					{/if}
 				</Card.Content>
 			</Card.Root>
 		</section>
@@ -1187,6 +1283,66 @@
 							<Alert.Title>Last PATHC repack</Alert.Title>
 							<Alert.Description>
 								Processed {pathcResult.processedCount} DDS file(s), updated {pathcResult.updatedCount} hash entries, added {pathcResult.addedTemplateCount} new DDS templates. Backup: {pathcResult.backupPath}
+							</Alert.Description>
+						</Alert.Root>
+					{/if}
+				</Card.Content>
+			</Card.Root>
+
+			<Card.Root>
+				<Card.Header>
+					<Card.Title class="flex items-center gap-2"><Archive class="size-5" /> Virtual file extraction</Card.Title>
+					<Card.Description>
+						Preview a virtual file in the game archives and extract its decompressed bytes into a chosen output folder.
+					</Card.Description>
+				</Card.Header>
+				<Card.Content class="space-y-4">
+					<div class="grid gap-4 sm:grid-cols-2">
+						<div class="space-y-2 sm:col-span-2">
+							<Label for="extract-virtual-path">Virtual path</Label>
+							<Input id="extract-virtual-path" bind:value={extractVirtualPathInput} placeholder="character/player/playeractiongraph_main.xml" />
+						</div>
+						<div class="space-y-2">
+							<Label for="extract-source-group">Preferred source group</Label>
+							<Input id="extract-source-group" bind:value={extractSourceGroupInput} placeholder="0008" />
+						</div>
+						<div class="space-y-2">
+							<Label for="extract-output">Output folder</Label>
+							<div class="flex flex-wrap gap-2">
+								<Input id="extract-output" bind:value={extractOutputDirInput} placeholder="Choose an output folder" />
+								<Button variant="outline" onclick={chooseExtractOutputDir}>Browse</Button>
+							</div>
+						</div>
+					</div>
+
+					<div class="flex flex-wrap gap-2">
+						<Button variant="outline" disabled={busy.extracting} onclick={refreshExtractPreview}>{busy.extracting ? 'Inspecting...' : 'Inspect file'}</Button>
+						<Button disabled={busy.extracting} onclick={runExtractVirtualFile}>{busy.extracting ? 'Extracting...' : 'Extract file'}</Button>
+					</div>
+
+					{#if extractPreview}
+						<div class="rounded-xl border bg-muted/20 p-4 text-sm">
+							<div class="flex flex-wrap items-center gap-2">
+								<p class="font-medium break-all">{extractPreview.virtualPath}</p>
+								<Badge variant={extractPreview.resolved ? 'outline' : 'secondary'}>{extractPreview.resolved ? 'Resolved' : 'Missing'}</Badge>
+							</div>
+							<p class="text-muted-foreground mt-2 text-xs">Source group: {extractPreview.sourceGroup}</p>
+							{#if extractPreview.resolved}
+								<p class="text-muted-foreground mt-1 text-xs">
+									{extractPreview.resolvedGameFile} / PAZ {extractPreview.sourcePazIndex} / {extractPreview.compressedSize} compressed / {extractPreview.decompressedSize} decompressed / flags {extractPreview.flags}
+								</p>
+							{:else if extractPreview.reason}
+								<p class="text-destructive mt-1 text-xs">{extractPreview.reason}</p>
+							{/if}
+						</div>
+					{/if}
+
+					{#if extractResult}
+						<Alert.Root>
+							<Info class="size-4" />
+							<Alert.Title>Last extraction</Alert.Title>
+							<Alert.Description>
+								Extracted {extractResult.virtualPath} from {extractResult.sourceGroup} to {extractResult.outputPath} ({extractResult.decompressedSize} bytes).
 							</Alert.Description>
 						</Alert.Root>
 					{/if}

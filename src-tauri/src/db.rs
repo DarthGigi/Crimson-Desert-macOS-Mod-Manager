@@ -299,6 +299,11 @@ pub fn set_patch_enabled(
     Ok(())
 }
 
+pub fn clear_patch_toggles(connection: &Connection) -> AppResult<()> {
+    connection.execute("DELETE FROM patch_toggles", [])?;
+    Ok(())
+}
+
 pub fn update_mod_enabled(connection: &Connection, mod_id: &str, enabled: bool) -> AppResult<()> {
     let updated = connection.execute(
         "UPDATE mods SET enabled = ?2, updated_at = ?3 WHERE id = ?1",

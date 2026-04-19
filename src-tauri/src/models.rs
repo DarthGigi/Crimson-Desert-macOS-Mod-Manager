@@ -186,6 +186,8 @@ pub struct ManagedGroupRecord {
 pub struct StatusSummary {
     pub game_install: Option<GameInstallInfo>,
     pub selected_language: Option<String>,
+    pub recovery_pending: bool,
+    pub pending_operation: Option<String>,
     pub overlay_active: bool,
     pub backup_exists: bool,
     pub total_mods: usize,
@@ -240,4 +242,27 @@ pub struct PathcRepackResult {
     pub processed_count: usize,
     pub updated_count: usize,
     pub added_template_count: usize,
+}
+
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ExtractPreview {
+    pub virtual_path: String,
+    pub source_group: String,
+    pub resolved: bool,
+    pub resolved_game_file: Option<String>,
+    pub source_paz_index: Option<u16>,
+    pub compressed_size: Option<usize>,
+    pub decompressed_size: Option<usize>,
+    pub flags: Option<u16>,
+    pub reason: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ExtractResult {
+    pub virtual_path: String,
+    pub source_group: String,
+    pub output_path: String,
+    pub decompressed_size: usize,
 }

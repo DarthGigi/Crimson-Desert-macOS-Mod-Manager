@@ -5,7 +5,7 @@ use std::path::Path;
 use lz4_flex::block;
 
 use crate::error::{AppError, AppResult};
-use crate::models::{ApplyFileResult, ApplyPreview, ApplyPreviewFile, ApplyResult, ManagedGroupRecord, ModChange, ModKind, ModRecord};
+use crate::models::{ApplyFileResult, ApplyPreview, ApplyPreviewFile, ApplyResult, ExtractPreview, ExtractResult, ManagedGroupRecord, ModChange, ModKind, ModRecord};
 use crate::mods::{load_enabled_manifests, merged_changes};
 use crate::util::now_iso_string;
 
@@ -564,6 +564,85 @@ pub fn preview_apply(
     })
 }
 
+pub fn preview_virtual_file(
+    game_dir: &Path,
+    virtual_path: &str,
+    source_group: Option<&str>,
+) -> AppResult<ExtractPreview> {
+    let mut cache = BTreeMap::new();
+    for group in source_group_candidates(game_dir, source_group)? {
+        let (simple_index, full_index) = load_group_indexes(game_dir, &group, &mut cache)?;
+        if let Some(info) = resolve_game_file(virtual_path, simple_index, full_index) {
+            return Ok(ExtractPreview {
+                virtual_path: virtual_path.to_string(),
+                source_group: group,
+                resolved: true,
+                resolved_game_file: Some(info.full_path.clone()),
+                source_paz_index: Some(info.record.paz_index),
+                compressed_size: Some(info.record.comp_size as usize),
+                decompressed_size: Some(info.record.decomp_size as usize),
+                flags: Some(info.record.flags),
+                reason: None,
+            });
+        }
+    }
+
+    Ok(ExtractPreview {
+        virtual_path: virtual_path.to_string(),
+        source_group: source_group.unwrap_or("auto").to_string(),
+        resolved: false,
+        resolved_game_file: None,
+        source_paz_index: None,
+        compressed_size: None,
+        decompressed_size: None,
+        flags: None,
+        reason: Some("Virtual file not found in any scanned source group".to_string()),
+    })
+}
+
+pub fn extract_virtual_file(
+    game_dir: &Path,
+    virtual_path: &str,
+    source_group: Option<&str>,
+    output_dir: &Path,
+) -> AppResult<ExtractResult> {
+    let preview = preview_virtual_file(game_dir, virtual_path, source_group)?;
+    if !preview.resolved {
+        return Err(AppError::NotFound(
+            preview.reason.unwrap_or_else(|| "Virtual file not found".to_string()),
+        ));
+    }
+
+    let mut cache = BTreeMap::new();
+    let (simple_index, full_index) = load_group_indexes(game_dir, &preview.source_group, &mut cache)?;
+    let info = resolve_game_file(virtual_path, simple_index, full_index)
+        .ok_or_else(|| AppError::NotFound(format!("Virtual file not found: {virtual_path}")))?;
+
+    let src_paz = game_dir
+        .join(&preview.source_group)
+        .join(format!("{}.paz", info.record.paz_index));
+    let compressed = read_paz_slice(
+        &src_paz,
+        info.record.paz_offset as usize,
+        info.record.comp_size as usize,
+    )?;
+    let decompressed = block::decompress(&compressed, info.record.decomp_size as usize)?;
+
+    let relative = Path::new(&info.full_path);
+    let output_path = output_dir.join(relative);
+    if let Some(parent) = output_path.parent() {
+        fs::create_dir_all(parent)?;
+    }
+    fs::write(&output_path, &decompressed)?;
+
+    Ok(ExtractResult {
+        virtual_path: virtual_path.to_string(),
+        source_group: preview.source_group,
+        output_path: output_path.display().to_string(),
+        decompressed_size: decompressed.len(),
+    })
+}
+
 fn load_group_indexes<'a>(
     game_dir: &Path,
     source_group: &str,
@@ -583,6 +662,36 @@ fn load_group_indexes<'a>(
     cache.get(source_group).ok_or_else(|| {
         AppError::NotFound(format!("Could not load source group indexes for {source_group}"))
     })
+}
+
+fn source_group_candidates(game_dir: &Path, source_group: Option<&str>) -> AppResult<Vec<String>> {
+    if let Some(source_group) = source_group {
+        return Ok(vec![source_group.to_string()]);
+    }
+
+    let mut groups = Vec::new();
+    for entry in fs::read_dir(game_dir)? {
+        let entry = entry?;
+        let path = entry.path();
+        if !path.is_dir() {
+            continue;
+        }
+
+        let Some(name) = path.file_name().and_then(|value| value.to_str()) else {
+            continue;
+        };
+
+        if name.len() == 4
+            && name.chars().all(|ch| ch.is_ascii_digit())
+            && path.join("0.pamt").is_file()
+        {
+            groups.push(name.to_string());
+        }
+    }
+
+    groups.sort();
+    groups.dedup();
+    Ok(groups)
 }
 
 fn count_overlaps(changes: &[(String, ModChange)]) -> usize {

@@ -11,7 +11,7 @@ use std::path::{Path, PathBuf};
 use std::sync::Mutex;
 
 use db::{
-    clear_managed_groups, connect, get_setting, insert_history, list_managed_groups, list_mods,
+    clear_managed_groups, clear_patch_toggles, connect, get_setting, insert_history, list_managed_groups, list_mods,
     list_disabled_patch_indexes, move_mod_in_load_order, replace_managed_groups, set_patch_enabled,
     set_setting, update_mod_classification, update_mod_enabled,
 };
@@ -19,7 +19,7 @@ use error::{AppError, ErrorPayload};
 use game::{
     detect_packages_dir, inspect_game_install, launch_game, resolve_to_packages_dir, LaunchResult,
 };
-use models::{ApplyPreview, ApplyResult, DashboardData, GameInstallInfo, ModKind, ModPatchSummary, ModRecord, PathcRepackResult, PathcSummary, ScanResult, StatusSummary};
+use models::{ApplyPreview, ApplyResult, DashboardData, ExtractPreview, ExtractResult, GameInstallInfo, ModKind, ModPatchSummary, ModRecord, PathcRepackResult, PathcSummary, ScanResult, StatusSummary};
 use tauri::{AppHandle, Manager, State};
 
 const SETTINGS_GAME_PATH: &str = "game_packages_path";
@@ -33,6 +33,14 @@ struct AppState {
 impl AppState {
     fn connection(&self) -> Result<rusqlite::Connection, AppError> {
         connect(&self.app_data_dir)
+    }
+
+    fn operation_marker_path(&self) -> PathBuf {
+        self.app_data_dir.join("operation-in-progress.json")
+    }
+
+    fn import_cache_dir(&self) -> PathBuf {
+        self.app_data_dir.join("mods").join("import-cache")
     }
 }
 
@@ -60,7 +68,7 @@ fn current_game_install(
     Ok(None)
 }
 
-fn build_dashboard(connection: &rusqlite::Connection) -> Result<DashboardData, AppError> {
+fn build_dashboard(connection: &rusqlite::Connection, app_data_dir: &Path) -> Result<DashboardData, AppError> {
     let mods = list_mods(connection)?;
     let managed_groups = list_managed_groups(connection)?;
     let selected_language = get_setting(connection, SETTINGS_GAME_LANGUAGE)?
@@ -89,11 +97,14 @@ fn build_dashboard(connection: &rusqlite::Connection) -> Result<DashboardData, A
             .join("0.papgt.bak")
             .is_file()
     });
+    let recovery_marker = read_operation_marker(app_data_dir)?;
 
     Ok(DashboardData {
         status: StatusSummary {
             game_install,
             selected_language,
+            recovery_pending: recovery_marker.is_some(),
+            pending_operation: recovery_marker,
             overlay_active,
             backup_exists,
             total_mods: mods.len(),
@@ -106,10 +117,67 @@ fn build_dashboard(connection: &rusqlite::Connection) -> Result<DashboardData, A
     })
 }
 
+fn read_operation_marker(app_data_dir: &Path) -> Result<Option<String>, AppError> {
+    let marker_path = app_data_dir.join("operation-in-progress.json");
+    if !marker_path.is_file() {
+        return Ok(None);
+    }
+    let raw = std::fs::read_to_string(marker_path)?;
+    let value: serde_json::Value = serde_json::from_str(&raw)?;
+    Ok(value
+        .get("operation")
+        .and_then(|value| value.as_str())
+        .map(str::to_string))
+}
+
+fn set_operation_marker(state: &AppState, operation: &str) -> Result<(), AppError> {
+    std::fs::write(
+        state.operation_marker_path(),
+        serde_json::to_vec(&serde_json::json!({ "operation": operation }))?,
+    )?;
+    Ok(())
+}
+
+fn clear_operation_marker(state: &AppState) -> Result<(), AppError> {
+    let marker = state.operation_marker_path();
+    if marker.exists() {
+        std::fs::remove_file(marker)?;
+    }
+    Ok(())
+}
+
+struct OperationMarkerGuard<'a> {
+    state: &'a AppState,
+    active: bool,
+}
+
+impl<'a> OperationMarkerGuard<'a> {
+    fn new(state: &'a AppState, operation: &str) -> Result<Self, AppError> {
+        set_operation_marker(state, operation)?;
+        Ok(Self { state, active: true })
+    }
+
+    fn clear(&mut self) -> Result<(), AppError> {
+        if self.active {
+            clear_operation_marker(self.state)?;
+            self.active = false;
+        }
+        Ok(())
+    }
+}
+
+impl Drop for OperationMarkerGuard<'_> {
+    fn drop(&mut self) {
+        if self.active {
+            let _ = clear_operation_marker(self.state);
+        }
+    }
+}
+
 #[tauri::command]
 fn get_dashboard(state: State<'_, AppState>) -> Result<DashboardData, ErrorPayload> {
     let connection = state.connection().map_err(ErrorPayload::from)?;
-    build_dashboard(&connection).map_err(ErrorPayload::from)
+    build_dashboard(&connection, &state.app_data_dir).map_err(ErrorPayload::from)
 }
 
 #[tauri::command]
@@ -177,7 +245,7 @@ fn import_mod_variant_command(
         None,
     )
     .map_err(ErrorPayload::from)?;
-    build_dashboard(&connection).map_err(ErrorPayload::from)
+    build_dashboard(&connection, &state.app_data_dir).map_err(ErrorPayload::from)
 }
 
 #[tauri::command]
@@ -199,7 +267,7 @@ fn set_mod_enabled_command(
         None,
     )
     .map_err(ErrorPayload::from)?;
-    build_dashboard(&connection).map_err(ErrorPayload::from)
+    build_dashboard(&connection, &state.app_data_dir).map_err(ErrorPayload::from)
 }
 
 #[tauri::command]
@@ -214,7 +282,7 @@ fn set_selected_language_command(
         language.as_deref().unwrap_or(""),
     )
     .map_err(ErrorPayload::from)?;
-    build_dashboard(&connection).map_err(ErrorPayload::from)
+    build_dashboard(&connection, &state.app_data_dir).map_err(ErrorPayload::from)
 }
 
 #[tauri::command]
@@ -252,7 +320,7 @@ fn set_mod_classification_command(
         None,
     )
     .map_err(ErrorPayload::from)?;
-    build_dashboard(&connection).map_err(ErrorPayload::from)
+    build_dashboard(&connection, &state.app_data_dir).map_err(ErrorPayload::from)
 }
 
 #[tauri::command]
@@ -271,7 +339,7 @@ fn move_mod_in_load_order_command(
         None,
     )
     .map_err(ErrorPayload::from)?;
-    build_dashboard(&connection).map_err(ErrorPayload::from)
+    build_dashboard(&connection, &state.app_data_dir).map_err(ErrorPayload::from)
 }
 
 #[tauri::command]
@@ -309,7 +377,7 @@ fn set_patch_enabled_command(
         None,
     )
     .map_err(ErrorPayload::from)?;
-    build_dashboard(&connection).map_err(ErrorPayload::from)
+    build_dashboard(&connection, &state.app_data_dir).map_err(ErrorPayload::from)
 }
 
 #[tauri::command]
@@ -317,6 +385,7 @@ fn apply_mods_command(state: State<'_, AppState>) -> Result<ApplyResult, ErrorPa
     let _guard = state.operation_lock.lock().map_err(|_| ErrorPayload {
         message: "Operation lock poisoned".to_string(),
     })?;
+    let mut marker = OperationMarkerGuard::new(&state, "apply").map_err(ErrorPayload::from)?;
     let mut connection = state.connection().map_err(ErrorPayload::from)?;
     let packages_dir = saved_game_path(&connection)
         .map_err(ErrorPayload::from)?
@@ -341,6 +410,7 @@ fn apply_mods_command(state: State<'_, AppState>) -> Result<ApplyResult, ErrorPa
     replace_managed_groups(&mut connection, &replacement_groups).map_err(ErrorPayload::from)?;
     insert_history(&connection, "apply", "ok", &result.message, None)
         .map_err(ErrorPayload::from)?;
+    marker.clear().map_err(ErrorPayload::from)?;
     Ok(result)
 }
 
@@ -366,6 +436,7 @@ fn restore_vanilla_command(state: State<'_, AppState>) -> Result<DashboardData, 
     let _guard = state.operation_lock.lock().map_err(|_| ErrorPayload {
         message: "Operation lock poisoned".to_string(),
     })?;
+    let mut marker = OperationMarkerGuard::new(&state, "restore").map_err(ErrorPayload::from)?;
     let connection = state.connection().map_err(ErrorPayload::from)?;
     let packages_dir = saved_game_path(&connection)
         .map_err(ErrorPayload::from)?
@@ -383,7 +454,8 @@ fn restore_vanilla_command(state: State<'_, AppState>) -> Result<DashboardData, 
         None,
     )
     .map_err(ErrorPayload::from)?;
-    build_dashboard(&connection).map_err(ErrorPayload::from)
+    marker.clear().map_err(ErrorPayload::from)?;
+    build_dashboard(&connection, &state.app_data_dir).map_err(ErrorPayload::from)
 }
 
 #[tauri::command]
@@ -391,6 +463,7 @@ fn reset_active_mods_command(state: State<'_, AppState>) -> Result<DashboardData
     let _guard = state.operation_lock.lock().map_err(|_| ErrorPayload {
         message: "Operation lock poisoned".to_string(),
     })?;
+    let mut marker = OperationMarkerGuard::new(&state, "reset").map_err(ErrorPayload::from)?;
     let connection = state.connection().map_err(ErrorPayload::from)?;
     if let Some(packages_dir) = saved_game_path(&connection).map_err(ErrorPayload::from)? {
         let managed_groups = list_managed_groups(&connection).map_err(ErrorPayload::from)?;
@@ -406,7 +479,8 @@ fn reset_active_mods_command(state: State<'_, AppState>) -> Result<DashboardData
         None,
     )
     .map_err(ErrorPayload::from)?;
-    build_dashboard(&connection).map_err(ErrorPayload::from)
+    marker.clear().map_err(ErrorPayload::from)?;
+    build_dashboard(&connection, &state.app_data_dir).map_err(ErrorPayload::from)
 }
 
 #[tauri::command]
@@ -451,6 +525,7 @@ fn repack_pathc_command(
     let _guard = state.operation_lock.lock().map_err(|_| ErrorPayload {
         message: "Operation lock poisoned".to_string(),
     })?;
+    let mut marker = OperationMarkerGuard::new(&state, "pathc_repack").map_err(ErrorPayload::from)?;
     let connection = state.connection().map_err(ErrorPayload::from)?;
     let resolved_path = if let Some(path) = path.filter(|value| !value.trim().is_empty()) {
         PathBuf::from(path)
@@ -472,6 +547,88 @@ fn repack_pathc_command(
         None,
     )
     .map_err(ErrorPayload::from)?;
+    marker.clear().map_err(ErrorPayload::from)?;
+    Ok(result)
+}
+
+#[tauri::command]
+fn fix_everything_command(state: State<'_, AppState>) -> Result<DashboardData, ErrorPayload> {
+    let _guard = state.operation_lock.lock().map_err(|_| ErrorPayload {
+        message: "Operation lock poisoned".to_string(),
+    })?;
+    let mut marker = OperationMarkerGuard::new(&state, "fix_everything").map_err(ErrorPayload::from)?;
+    let connection = state.connection().map_err(ErrorPayload::from)?;
+
+    if let Some(packages_dir) = saved_game_path(&connection).map_err(ErrorPayload::from)? {
+        let managed_groups = list_managed_groups(&connection).map_err(ErrorPayload::from)?;
+        patcher::restore_vanilla(&packages_dir, &managed_groups).map_err(ErrorPayload::from)?;
+    }
+
+    clear_managed_groups(&connection).map_err(ErrorPayload::from)?;
+    clear_patch_toggles(&connection).map_err(ErrorPayload::from)?;
+    db::disable_all_mods(&connection).map_err(ErrorPayload::from)?;
+    let import_cache = state.import_cache_dir();
+    if import_cache.is_dir() {
+        std::fs::remove_dir_all(&import_cache).map_err(AppError::from).map_err(ErrorPayload::from)?;
+        std::fs::create_dir_all(&import_cache).map_err(AppError::from).map_err(ErrorPayload::from)?;
+    }
+
+    insert_history(
+        &connection,
+        "fix_everything",
+        "ok",
+        "Restored vanilla state, cleared managed groups, disabled mods, and reset patch toggles",
+        None,
+    )
+    .map_err(ErrorPayload::from)?;
+    marker.clear().map_err(ErrorPayload::from)?;
+    build_dashboard(&connection, &state.app_data_dir).map_err(ErrorPayload::from)
+}
+
+#[tauri::command]
+fn get_virtual_file_preview_command(
+    virtual_path: String,
+    source_group: Option<String>,
+    state: State<'_, AppState>,
+) -> Result<ExtractPreview, ErrorPayload> {
+    let connection = state.connection().map_err(ErrorPayload::from)?;
+    let packages_dir = saved_game_path(&connection)
+        .map_err(ErrorPayload::from)?
+        .ok_or_else(|| ErrorPayload {
+            message: "Set the Crimson Desert game path first.".to_string(),
+        })?;
+    patcher::preview_virtual_file(&packages_dir, &virtual_path, source_group.as_deref())
+        .map_err(ErrorPayload::from)
+}
+
+#[tauri::command]
+fn extract_virtual_file_command(
+    virtual_path: String,
+    source_group: Option<String>,
+    output_dir: String,
+    state: State<'_, AppState>,
+) -> Result<ExtractResult, ErrorPayload> {
+    let _guard = state.operation_lock.lock().map_err(|_| ErrorPayload {
+        message: "Operation lock poisoned".to_string(),
+    })?;
+    let mut marker = OperationMarkerGuard::new(&state, "extract_virtual_file").map_err(ErrorPayload::from)?;
+    let connection = state.connection().map_err(ErrorPayload::from)?;
+    let packages_dir = saved_game_path(&connection)
+        .map_err(ErrorPayload::from)?
+        .ok_or_else(|| ErrorPayload {
+            message: "Set the Crimson Desert game path first.".to_string(),
+        })?;
+    let result = patcher::extract_virtual_file(&packages_dir, &virtual_path, source_group.as_deref(), Path::new(&output_dir))
+        .map_err(ErrorPayload::from)?;
+    insert_history(
+        &connection,
+        "extract_virtual_file",
+        "ok",
+        &format!("Extracted {} to {}", result.virtual_path, result.output_path),
+        None,
+    )
+    .map_err(ErrorPayload::from)?;
+    marker.clear().map_err(ErrorPayload::from)?;
     Ok(result)
 }
 
@@ -505,6 +662,9 @@ pub fn run() {
             launch_game_command,
             get_pathc_summary_command,
             repack_pathc_command,
+            fix_everything_command,
+            get_virtual_file_preview_command,
+            extract_virtual_file_command,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
