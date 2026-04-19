@@ -1,0 +1,104 @@
+name: release
+
+on:
+  workflow_dispatch:
+  push:
+    tags:
+      - 'v*'
+
+jobs:
+  build-macos:
+    permissions:
+      contents: write
+      id-token: write
+      attestations: write
+      artifact-metadata: write
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - target: aarch64-apple-darwin
+            runner: macos-latest
+            arch: aarch64
+          - target: x86_64-apple-darwin
+            runner: macos-13
+            arch: x86_64
+    runs-on: ${{ matrix.runner }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: lts/*
+          cache: pnpm
+
+      - name: Setup pnpm
+        uses: pnpm/action-setup@v4
+        with:
+          version: 10
+
+      - name: Install Rust stable
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: aarch64-apple-darwin,x86_64-apple-darwin
+
+      - name: Cache Rust
+        uses: swatinem/rust-cache@v2
+        with:
+          workspaces: './src-tauri -> target'
+
+      - name: Install frontend dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Ensure bundled 7z is executable
+        run: chmod +x src-tauri/binaries/7z
+
+      - name: Build Tauri bundles
+        run: pnpm tauri build --bundles app,dmg --target ${{ matrix.target }}
+
+      - name: Resolve bundle paths
+        id: bundle_paths
+        shell: bash
+        run: |
+          APP_PATH=$(find src-tauri/target/${{ matrix.target }}/release/bundle/macos -maxdepth 1 -name '*.app' -print -quit)
+          DMG_PATH=$(find src-tauri/target/${{ matrix.target }}/release/bundle/dmg -maxdepth 1 -name '*.dmg' -print -quit)
+          echo "app_path=$APP_PATH" >> "$GITHUB_OUTPUT"
+          echo "dmg_path=$DMG_PATH" >> "$GITHUB_OUTPUT"
+
+      - name: Upload app artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: Crimson-Desert-Mod-Manager-${{ matrix.arch }}-app
+          path: ${{ steps.bundle_paths.outputs.app_path }}
+
+      - name: Upload dmg artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: Crimson-Desert-Mod-Manager-${{ matrix.arch }}-dmg
+          path: ${{ steps.bundle_paths.outputs.dmg_path }}
+
+      - name: Attest app artifact
+        uses: actions/attest@v4
+        with:
+          subject-path: ${{ steps.bundle_paths.outputs.app_path }}
+
+      - name: Attest dmg artifact
+        uses: actions/attest@v4
+        with:
+          subject-path: ${{ steps.bundle_paths.outputs.dmg_path }}
+
+      - name: Publish release assets
+        uses: softprops/action-gh-release@v2
+        with:
+          files: |
+            ${{ steps.bundle_paths.outputs.app_path }}
+            ${{ steps.bundle_paths.outputs.dmg_path }}
+          draft: true
+          prerelease: false
+          generate_release_notes: true
+          body: |
+            Unsigned macOS builds.
+
+            These bundles are ad-hoc signed and may still require Gatekeeper bypass on first launch.
