@@ -3,6 +3,10 @@
 	"version": "0.1.0",
 	"description": "A macOS mod manager for Crimson Desert with JSON, overlay, PATHC, and archive workflows.",
 	"type": "module",
+	"repository": {
+		"type": "git",
+		"url": "https://github.com/DarthGigi/Crimson-Desert-macOS-Mod-Manager.git"
+	},
 	"scripts": {
 		"dev": "vite dev",
 		"build": "vite build",
