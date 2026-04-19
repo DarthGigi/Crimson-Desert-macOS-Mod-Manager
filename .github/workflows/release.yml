@@ -137,7 +137,7 @@ jobs:
             ${{ steps.bundle_paths.outputs.dmg_path }}
             ${{ steps.bundle_paths.outputs.latest_json }}
             ${{ steps.bundle_paths.outputs.updater_artifacts }}
-          draft: true
+          draft: false
           prerelease: false
           generate_release_notes: true
           body: |
