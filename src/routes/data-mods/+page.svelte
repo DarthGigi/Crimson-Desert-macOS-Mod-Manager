@@ -36,9 +36,9 @@
 		const selected = await open({
 			multiple: false,
 			directory: false,
-			filters: [{ name: 'ZIP archives', extensions: ['zip'] }],
+			filters: [{ name: 'Mod archives', extensions: ['zip', '7z', 'rar'] }],
 			defaultPath: importSourcePath || undefined,
-			title: 'Choose a ZIP archive'
+			title: 'Choose a ZIP, 7Z, or RAR archive'
 		});
 		if (typeof selected === 'string') {
 			importSourcePath = selected;
@@ -66,7 +66,7 @@
 			><Card.Title class="flex items-center gap-2"
 				><HardDriveDownload class="size-5" /> Import source</Card.Title
 			><Card.Description
-				>Scan a folder or ZIP archive and import one candidate at a time.</Card.Description
+				>Scan a folder or ZIP/7Z/RAR archive and import one candidate at a time.</Card.Description
 			></Card.Header
 		>
 		<Card.Content class="space-y-4">
@@ -76,7 +76,7 @@
 					{manager.busy.scanningMods ? 'Scanning...' : 'Choose folder'}</Button
 				>
 				<Button variant="outline" disabled={manager.busy.scanningMods} onclick={chooseZip}
-					><HardDriveDownload class="size-4" /> Choose ZIP</Button
+					><HardDriveDownload class="size-4" /> Choose archive</Button
 				>
 			</div>
 			{#if importSourcePath}<p class="text-sm break-all text-muted-foreground">
@@ -86,7 +86,7 @@
 				<Empty.Root class="min-h-40 border-dashed bg-muted/20 p-8"
 					><Empty.Header
 						><Empty.Title>No scanned candidates</Empty.Title><Empty.Description
-							>Pick a folder or ZIP archive to preview importable JSON, precompiled, and browser/raw
+							>Pick a folder or ZIP/7Z/RAR archive to preview importable JSON, precompiled, and browser/raw
 							mods.</Empty.Description
 						></Empty.Header
 					></Empty.Root

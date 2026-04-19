@@ -2,10 +2,12 @@ use std::collections::{BTreeMap, BTreeSet};
 use std::fs;
 use std::path::Path;
 
+use chacha20::cipher::{KeyIvInit, StreamCipher, StreamCipherSeek};
+use chacha20::ChaCha20Legacy;
 use lz4_flex::block;
 
 use crate::error::{AppError, AppResult};
-use crate::models::{ApplyFileResult, ApplyPreview, ApplyPreviewFile, ApplyResult, ExtractPreview, ExtractResult, ManagedGroupRecord, ModChange, ModKind, ModRecord, VirtualFileMatch};
+use crate::models::{ApplyFileResult, ApplyPreview, ApplyPreviewFile, ApplyResult, ExtractPreview, ExtractResult, ManagedGroupRecord, ModChange, ModKind, ModRecord, VirtualFileMatch, XmlPreview, XmlRepackResult};
 use crate::mods::{load_enabled_manifests, merged_changes};
 use crate::util::now_iso_string;
 
@@ -14,6 +16,18 @@ const MASK: u32 = 0xFFFF_FFFF;
 const PAZ_ALIGNMENT: usize = 16;
 const PAMT_UNKNOWN: u32 = 0x610E_0232;
 const PAPGT_LANG_ALL: u16 = 0x3FFF;
+const HASH_INITVAL: u32 = 0x000C5EDE;
+const IV_XOR: u32 = 0x6061_6263;
+const XOR_DELTAS: [u32; 8] = [
+    0x0000_0000,
+    0x0A0A_0A0A,
+    0x0C0C_0C0C,
+    0x0606_0606,
+    0x0E0E_0E0E,
+    0x0A0A_0A0A,
+    0x0606_0606,
+    0x0202_0202,
+];
 
 #[allow(dead_code)]
 #[derive(Debug, Clone)]
@@ -41,6 +55,16 @@ pub struct FileRecord {
     pub decomp_size: u32,
     pub paz_index: u16,
     pub flags: u16,
+}
+
+impl FileRecord {
+    fn compression_type(&self) -> u16 {
+        self.flags
+    }
+
+    fn encrypted(&self, filename: &str) -> bool {
+        filename.to_ascii_lowercase().ends_with(".xml")
+    }
 }
 
 #[allow(dead_code)]
@@ -679,6 +703,121 @@ pub fn search_virtual_files(
     Ok(matches)
 }
 
+pub fn extract_xml_entry(
+    game_dir: &Path,
+    virtual_path: &str,
+    source_group: Option<&str>,
+    output_dir: &Path,
+) -> AppResult<XmlPreview> {
+    let preview = preview_virtual_file(game_dir, virtual_path, source_group)?;
+    if !preview.resolved {
+        return Err(AppError::NotFound(
+            preview.reason.unwrap_or_else(|| "Virtual file not found".to_string()),
+        ));
+    }
+
+    let mut cache = BTreeMap::new();
+    let (simple_index, full_index) = load_group_indexes(game_dir, &preview.source_group, &mut cache)?;
+    let info = resolve_game_file(virtual_path, simple_index, full_index)
+        .ok_or_else(|| AppError::NotFound(format!("Virtual file not found: {virtual_path}")))?;
+    let src_paz = game_dir
+        .join(&preview.source_group)
+        .join(format!("{}.paz", info.record.paz_index));
+    let compressed = read_paz_slice(&src_paz, info.record.paz_offset as usize, info.record.comp_size as usize)?;
+    let mut data = compressed;
+    let encrypted = info.record.encrypted(&info.filename);
+    let compressed_flag = info.record.compression_type() == 2;
+
+    if encrypted {
+        data = xml_crypt(&data, &info.filename)?;
+    }
+    if compressed_flag {
+        data = block::decompress(&data, info.record.decomp_size as usize)?;
+    }
+
+    let relative = Path::new(&info.full_path);
+    let output_path = output_dir.join(relative);
+    if let Some(parent) = output_path.parent() {
+        fs::create_dir_all(parent)?;
+    }
+    fs::write(&output_path, &data)?;
+
+    Ok(XmlPreview {
+        virtual_path: virtual_path.to_string(),
+        source_group: preview.source_group,
+        source_paz_index: info.record.paz_index,
+        encrypted,
+        compressed: compressed_flag,
+        compressed_size: info.record.comp_size as usize,
+        decompressed_size: info.record.decomp_size as usize,
+        extracted_path: output_path.display().to_string(),
+    })
+}
+
+pub fn repack_xml_entry(
+    game_dir: &Path,
+    virtual_path: &str,
+    source_group: Option<&str>,
+    modified_path: &Path,
+    output_path: Option<&Path>,
+) -> AppResult<XmlRepackResult> {
+    let preview = preview_virtual_file(game_dir, virtual_path, source_group)?;
+    if !preview.resolved {
+        return Err(AppError::NotFound(
+            preview.reason.unwrap_or_else(|| "Virtual file not found".to_string()),
+        ));
+    }
+
+    let mut cache = BTreeMap::new();
+    let (simple_index, full_index) = load_group_indexes(game_dir, &preview.source_group, &mut cache)?;
+    let info = resolve_game_file(virtual_path, simple_index, full_index)
+        .ok_or_else(|| AppError::NotFound(format!("Virtual file not found: {virtual_path}")))?;
+
+    let plaintext = fs::read(modified_path)?;
+    let mut payload = if info.record.compression_type() == 2 {
+        block::compress(&plaintext)
+    } else {
+        plaintext.clone()
+    };
+    if info.record.encrypted(&info.filename) {
+        payload = xml_crypt(&payload, &info.filename)?;
+    }
+
+    let exact_fit = payload.len() == info.record.comp_size as usize;
+    let mut patched_in_place = false;
+    let mut written_output = None;
+
+    if let Some(output_path) = output_path {
+        if let Some(parent) = output_path.parent() {
+            fs::create_dir_all(parent)?;
+        }
+        fs::write(output_path, &payload)?;
+        written_output = Some(output_path.display().to_string());
+    }
+
+    if exact_fit && output_path.is_none() {
+        let src_paz = game_dir
+            .join(&preview.source_group)
+            .join(format!("{}.paz", info.record.paz_index));
+        let mut file = std::fs::OpenOptions::new().read(true).write(true).open(&src_paz)?;
+        use std::io::{Seek, SeekFrom, Write};
+        file.seek(SeekFrom::Start(info.record.paz_offset as u64))?;
+        file.write_all(&payload)?;
+        patched_in_place = true;
+    }
+
+    Ok(XmlRepackResult {
+        virtual_path: virtual_path.to_string(),
+        source_group: preview.source_group,
+        modified_path: modified_path.display().to_string(),
+        target_comp_size: info.record.comp_size as usize,
+        new_comp_size: payload.len(),
+        exact_fit,
+        patched_in_place,
+        output_path: written_output,
+    })
+}
+
 fn load_group_indexes<'a>(
     game_dir: &Path,
     source_group: &str,
@@ -728,6 +867,115 @@ fn source_group_candidates(game_dir: &Path, source_group: Option<&str>) -> AppRe
     groups.sort();
     groups.dedup();
     Ok(groups)
+}
+
+fn xml_crypt(data: &[u8], filename: &str) -> AppResult<Vec<u8>> {
+    let (key, nonce, counter) = derive_key_iv(filename);
+    let mut cipher = ChaCha20Legacy::new(&key.into(), (&nonce).into());
+    cipher.seek(counter * 64);
+    let mut buffer = data.to_vec();
+    cipher.apply_keystream(&mut buffer);
+    Ok(buffer)
+}
+
+fn derive_key_iv(filename: &str) -> ([u8; 32], [u8; 8], u64) {
+    let basename = Path::new(filename)
+        .file_name()
+        .unwrap_or_else(|| std::ffi::OsStr::new(filename))
+        .to_string_lossy()
+        .to_lowercase();
+    let seed = hashlittle_lookup3(basename.as_bytes(), HASH_INITVAL);
+
+    let mut iv = [0u8; 16];
+    for chunk in iv.chunks_mut(4) {
+        chunk.copy_from_slice(&seed.to_le_bytes());
+    }
+
+    let mut key = [0u8; 32];
+    let key_base = seed ^ IV_XOR;
+    for (index, chunk) in key.chunks_mut(4).enumerate() {
+        chunk.copy_from_slice(&(key_base ^ XOR_DELTAS[index]).to_le_bytes());
+    }
+
+    let mut nonce = [0u8; 8];
+    nonce.copy_from_slice(&iv[8..16]);
+    let counter = u64::from_le_bytes(iv[0..8].try_into().unwrap());
+    (key, nonce, counter)
+}
+
+fn hashlittle_lookup3(data: &[u8], initval: u32) -> u32 {
+    let length = data.len() as u32;
+    let mut a = 0xDEAD_BEEF_u32.wrapping_add(length).wrapping_add(initval);
+    let mut b = a;
+    let mut c = a;
+    let mut off = 0usize;
+    let mut remaining = data.len();
+
+    while remaining > 12 {
+        a = a.wrapping_add(u32::from_le_bytes(data[off..off + 4].try_into().unwrap()));
+        b = b.wrapping_add(u32::from_le_bytes(data[off + 4..off + 8].try_into().unwrap()));
+        c = c.wrapping_add(u32::from_le_bytes(data[off + 8..off + 12].try_into().unwrap()));
+        a = a.wrapping_sub(c) ^ rot32(c, 4);
+        c = c.wrapping_add(b);
+        b = b.wrapping_sub(a) ^ rot32(a, 6);
+        a = a.wrapping_add(c);
+        c = c.wrapping_sub(b) ^ rot32(b, 8);
+        b = b.wrapping_add(a);
+        a = a.wrapping_sub(c) ^ rot32(c, 16);
+        c = c.wrapping_add(b);
+        b = b.wrapping_sub(a) ^ rot32(a, 19);
+        a = a.wrapping_add(c);
+        c = c.wrapping_sub(b) ^ rot32(b, 4);
+        b = b.wrapping_add(a);
+        off += 12;
+        remaining -= 12;
+    }
+
+    let mut tail = [0u8; 12];
+    tail[..remaining].copy_from_slice(&data[off..off + remaining]);
+    if remaining >= 9 {
+        let mut word = u32::from_le_bytes(tail[8..12].try_into().unwrap());
+        if remaining < 12 {
+            word &= 0xFFFF_FFFF >> (8 * (12 - remaining));
+        }
+        c = c.wrapping_add(word);
+    }
+    if remaining >= 5 {
+        let mut word = u32::from_le_bytes(tail[4..8].try_into().unwrap());
+        if remaining < 8 {
+            word &= 0xFFFF_FFFF >> (8 * (8 - remaining));
+        }
+        b = b.wrapping_add(word);
+    }
+    if remaining >= 1 {
+        let mut word = u32::from_le_bytes(tail[0..4].try_into().unwrap());
+        if remaining < 4 {
+            word &= 0xFFFF_FFFF >> (8 * (4 - remaining));
+        }
+        a = a.wrapping_add(word);
+    } else {
+        return c;
+    }
+
+    c ^= b;
+    c = c.wrapping_sub(rot32(b, 14));
+    a ^= c;
+    a = a.wrapping_sub(rot32(c, 11));
+    b ^= a;
+    b = b.wrapping_sub(rot32(a, 25));
+    c ^= b;
+    c = c.wrapping_sub(rot32(b, 16));
+    a ^= c;
+    a = a.wrapping_sub(rot32(c, 4));
+    b ^= a;
+    b = b.wrapping_sub(rot32(a, 14));
+    c ^= b;
+    c = c.wrapping_sub(rot32(b, 24));
+    c
+}
+
+fn rot32(value: u32, bits: u32) -> u32 {
+	value.rotate_left(bits)
 }
 
 fn count_overlaps(changes: &[(String, ModChange)]) -> usize {

@@ -18,6 +18,11 @@
 	let extractVirtualPathInput = $state('character/player/playeractiongraph_main.xml');
 	let extractSourceGroupInput = $state('0008');
 	let extractOutputDirInput = $state('');
+	let xmlVirtualPathInput = $state('technique/lightpreset.xml');
+	let xmlSourceGroupInput = $state('0008');
+	let xmlOutputDirInput = $state('');
+	let xmlModifiedPathInput = $state('');
+	let xmlPayloadOutputPath = $state('');
 
 	onMount(async () => {
 		await manager.ensureLoaded();
@@ -65,6 +70,43 @@
 
 		if (typeof selected === 'string') {
 			extractOutputDirInput = selected;
+		}
+	}
+
+	async function chooseXmlOutputDir() {
+		const selected = await open({
+			multiple: false,
+			directory: true,
+			defaultPath: xmlOutputDirInput || undefined,
+			title: 'Choose an output folder for extracted XML'
+		});
+		if (typeof selected === 'string') {
+			xmlOutputDirInput = selected;
+		}
+	}
+
+	async function chooseXmlModifiedFile() {
+		const selected = await open({
+			multiple: false,
+			directory: false,
+			filters: [{ name: 'XML files', extensions: ['xml'] }],
+			defaultPath: xmlModifiedPathInput || undefined,
+			title: 'Choose a modified XML file'
+		});
+		if (typeof selected === 'string') {
+			xmlModifiedPathInput = selected;
+		}
+	}
+
+	async function chooseXmlPayloadOutput() {
+		const selected = await open({
+			multiple: false,
+			directory: false,
+			defaultPath: xmlPayloadOutputPath || undefined,
+			title: 'Choose an output file for the encrypted/compressed payload'
+		});
+		if (typeof selected === 'string') {
+			xmlPayloadOutputPath = selected;
 		}
 	}
 </script>
@@ -231,6 +273,86 @@
 					<Alert.Title>Last extraction</Alert.Title>
 					<Alert.Description>
 						Extracted {manager.extractResult.virtualPath} from {manager.extractResult.sourceGroup} to {manager.extractResult.outputPath} ({manager.extractResult.decompressedSize} bytes).
+					</Alert.Description>
+				</Alert.Root>
+			{/if}
+		</Card.Content>
+	</Card.Root>
+
+	<Card.Root>
+		<Card.Header>
+			<Card.Title class="flex items-center gap-2"><Info class="size-5" /> XML decrypt and repack</Card.Title>
+			<Card.Description>
+				Extract a real XML entry with filename-derived ChaCha20 decryption and prepare an encrypted/compressed replacement payload. In-place patching only happens when the resulting payload exactly matches the original compressed size.
+			</Card.Description>
+		</Card.Header>
+		<Card.Content class="space-y-4">
+			<div class="grid gap-4 sm:grid-cols-2">
+				<div class="space-y-2 sm:col-span-2">
+					<Label for="xml-virtual-path">XML virtual path</Label>
+					<Input id="xml-virtual-path" bind:value={xmlVirtualPathInput} placeholder="technique/lightpreset.xml" />
+				</div>
+				<div class="space-y-2">
+					<Label for="xml-source-group">Source group</Label>
+					<Input id="xml-source-group" bind:value={xmlSourceGroupInput} placeholder="0008" />
+				</div>
+				<div class="space-y-2">
+					<Label for="xml-output-dir">XML output folder</Label>
+					<div class="flex flex-wrap gap-2">
+						<Input id="xml-output-dir" bind:value={xmlOutputDirInput} placeholder="Choose an output folder" />
+						<Button variant="outline" onclick={chooseXmlOutputDir}>Browse</Button>
+					</div>
+				</div>
+			</div>
+
+			<div class="flex flex-wrap gap-2">
+				<Button variant="outline" disabled={manager.busy.xml} onclick={() => manager.extractXmlEntry(xmlVirtualPathInput, xmlSourceGroupInput || null, xmlOutputDirInput)}>
+					{manager.busy.xml ? 'Processing...' : 'Extract XML'}
+				</Button>
+			</div>
+
+			{#if manager.xmlPreview}
+				<div class="rounded-xl border bg-muted/20 p-4 text-sm">
+					<p class="font-medium break-all">{manager.xmlPreview.virtualPath}</p>
+					<p class="text-muted-foreground mt-2 text-xs">
+						{manager.xmlPreview.sourceGroup} / PAZ {manager.xmlPreview.sourcePazIndex} / {manager.xmlPreview.compressed ? 'Compressed' : 'Stored'} / {manager.xmlPreview.encrypted ? 'Encrypted' : 'Plain'}
+					</p>
+					<p class="text-muted-foreground mt-1 text-xs">
+						{manager.xmlPreview.compressedSize} compressed / {manager.xmlPreview.decompressedSize} decompressed
+					</p>
+					<p class="mt-1 text-xs break-all">Extracted to {manager.xmlPreview.extractedPath}</p>
+				</div>
+			{/if}
+
+			<div class="grid gap-4 sm:grid-cols-2">
+				<div class="space-y-2 sm:col-span-2">
+					<Label for="xml-modified">Modified XML file</Label>
+					<div class="flex flex-wrap gap-2">
+						<Input id="xml-modified" bind:value={xmlModifiedPathInput} placeholder="Choose a modified XML file" />
+						<Button variant="outline" onclick={chooseXmlModifiedFile}>Browse</Button>
+					</div>
+				</div>
+				<div class="space-y-2 sm:col-span-2">
+					<Label for="xml-payload-output">Optional payload output file</Label>
+					<div class="flex flex-wrap gap-2">
+						<Input id="xml-payload-output" bind:value={xmlPayloadOutputPath} placeholder="Write encrypted/compressed payload to file instead of patching in place" />
+						<Button variant="outline" onclick={chooseXmlPayloadOutput}>Browse</Button>
+					</div>
+				</div>
+			</div>
+
+			<div class="flex flex-wrap gap-2">
+				<Button disabled={manager.busy.xml} onclick={() => manager.repackXmlEntry(xmlVirtualPathInput, xmlSourceGroupInput || null, xmlModifiedPathInput, xmlPayloadOutputPath || null)}>
+					{manager.busy.xml ? 'Processing...' : 'Repack XML'}
+				</Button>
+			</div>
+
+			{#if manager.xmlRepackResult}
+				<Alert.Root>
+					<Info class="size-4" />
+					<Alert.Title>Last XML repack</Alert.Title>
+					<Alert.Description>
+						Target size {manager.xmlRepackResult.targetCompSize} bytes, new payload {manager.xmlRepackResult.newCompSize} bytes. {#if manager.xmlRepackResult.patchedInPlace}Patched in place.{:else if manager.xmlRepackResult.outputPath}Wrote payload to {manager.xmlRepackResult.outputPath}.{:else if !manager.xmlRepackResult.exactFit}Payload size does not match the original entry, so no in-place patch was made.{/if}
 					</Alert.Description>
 				</Alert.Root>
 			{/if}

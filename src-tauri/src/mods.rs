@@ -2,6 +2,7 @@ use std::collections::{BTreeMap, BTreeSet};
 use std::fs;
 use std::io;
 use std::path::{Path, PathBuf};
+use std::process::Command;
 
 use serde_json::Value;
 use zip::read::ZipArchive;
@@ -148,15 +149,22 @@ pub fn scan_import_source(
         .and_then(|value| value.to_str())
         .map(|value| value.to_ascii_lowercase())
         .unwrap_or_default();
-    if extension != "zip" {
+    if extension == "zip" {
+        let extracted_root = extract_zip_to_cache(source, app_data_dir)?;
+        return scan_mod_folder(&extracted_root, packages_dir);
+    }
+
+    if extension == "7z" || extension == "rar" {
+        let extracted_root = extract_archive_with_7z(source, app_data_dir)?;
+        return scan_mod_folder(&extracted_root, packages_dir);
+    }
+
+    {
         return Err(AppError::InvalidMod(format!(
             "Unsupported import source: {}",
             source.display()
         )));
     }
-
-    let extracted_root = extract_zip_to_cache(source, app_data_dir)?;
-    scan_mod_folder(&extracted_root, packages_dir)
 }
 
 pub fn detect_import_kind(path: &Path) -> AppResult<ModKind> {
@@ -758,6 +766,47 @@ fn extract_zip_to_cache(source: &Path, app_data_dir: &Path) -> AppResult<PathBuf
     Ok(cache_dir)
 }
 
+fn extract_archive_with_7z(source: &Path, app_data_dir: &Path) -> AppResult<PathBuf> {
+    let cache_root = app_data_dir.join("mods").join("import-cache");
+    fs::create_dir_all(&cache_root)?;
+
+    let cache_dir = cache_root.join(unique_id("archive"));
+    fs::create_dir_all(&cache_dir)?;
+
+    let tool = find_7z_tool().ok_or_else(|| {
+        AppError::Other("`7z` is not available on this system, so .7z/.rar archives cannot be imported".to_string())
+    })?;
+
+    let status = Command::new(tool)
+        .arg("x")
+        .arg(source)
+        .arg(format!("-o{}", cache_dir.display()))
+        .arg("-y")
+        .status()?;
+    if !status.success() {
+        return Err(AppError::Other(format!(
+            "Failed to extract archive {} with 7z",
+            source.display()
+        )));
+    }
+
+    Ok(cache_dir)
+}
+
+fn find_7z_tool() -> Option<&'static str> {
+    for tool in ["/opt/homebrew/bin/7z", "/usr/local/bin/7z", "7z"] {
+        if tool.contains('/') {
+            if Path::new(tool).is_file() {
+                return Some(tool);
+            }
+        } else if Command::new(tool).arg("--help").output().is_ok() {
+            return Some(tool);
+        }
+    }
+
+    None
+}
+
 pub fn merged_changes(
     enabled_mods: &[(ModRecord, ModManifest)],
 ) -> BTreeMap<PatchTarget, Vec<(String, ModChange)>> {
@@ -811,6 +860,7 @@ fn patch_title(patch: &ModPatch) -> String {
 mod tests {
     use std::fs::File;
     use std::io::Write;
+    use std::process::Command;
     use std::time::{SystemTime, UNIX_EPOCH};
 
     use super::*;
@@ -879,6 +929,41 @@ mod tests {
         let results = scan_import_source(&zip_path, None, &temp_root).unwrap();
         assert!(results.iter().any(|result| {
             result.mod_kind == ModKind::BrowserRaw && result.name == "Better Inventory UI compatible with BTM"
+        }));
+
+        let _ = fs::remove_dir_all(&temp_root);
+    }
+
+    #[test]
+    fn scans_7z_archive_and_finds_browser_raw_mod() {
+        let Some(tool) = find_7z_tool() else {
+            return;
+        };
+
+        let browser_raw_mod = Path::new(DOWNLOADED_MODS_DIR).join("Better_Inventory_UI_Compatible");
+        let temp_root = std::env::temp_dir().join(format!(
+            "cdmm_7z_scan_{}",
+            SystemTime::now()
+                .duration_since(UNIX_EPOCH)
+                .unwrap_or_default()
+                .as_nanos()
+        ));
+        fs::create_dir_all(&temp_root).unwrap();
+        let archive_path = temp_root.join("browser_raw.7z");
+
+        let status = Command::new(tool)
+            .arg("a")
+            .arg(&archive_path)
+            .arg(&browser_raw_mod)
+            .current_dir(Path::new(DOWNLOADED_MODS_DIR))
+            .status()
+            .unwrap();
+        assert!(status.success());
+
+        let results = scan_import_source(&archive_path, None, &temp_root).unwrap();
+        assert!(results.iter().any(|result| {
+            result.mod_kind == ModKind::BrowserRaw
+                && result.name == "Better Inventory UI compatible with BTM"
         }));
 
         let _ = fs::remove_dir_all(&temp_root);

@@ -280,6 +280,32 @@ pub struct VirtualFileMatch {
 
 #[derive(Debug, Clone, Serialize)]
 #[serde(rename_all = "camelCase")]
+pub struct XmlPreview {
+    pub virtual_path: String,
+    pub source_group: String,
+    pub source_paz_index: u16,
+    pub encrypted: bool,
+    pub compressed: bool,
+    pub compressed_size: usize,
+    pub decompressed_size: usize,
+    pub extracted_path: String,
+}
+
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct XmlRepackResult {
+    pub virtual_path: String,
+    pub source_group: String,
+    pub modified_path: String,
+    pub target_comp_size: usize,
+    pub new_comp_size: usize,
+    pub exact_fit: bool,
+    pub patched_in_place: bool,
+    pub output_path: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
 pub struct HistoryEntry {
     pub id: i64,
     pub action: String,

@@ -167,6 +167,28 @@ export type VirtualFileMatch = {
 	flags: number;
 };
 
+export type XmlPreview = {
+	virtualPath: string;
+	sourceGroup: string;
+	sourcePazIndex: number;
+	encrypted: boolean;
+	compressed: boolean;
+	compressedSize: number;
+	decompressedSize: number;
+	extractedPath: string;
+};
+
+export type XmlRepackResult = {
+	virtualPath: string;
+	sourceGroup: string;
+	modifiedPath: string;
+	targetCompSize: number;
+	newCompSize: number;
+	exactFit: boolean;
+	patchedInPlace: boolean;
+	outputPath: string | null;
+};
+
 export type StatusSummary = {
 	gameInstall: GameInstallInfo | null;
 	selectedLanguage: string | null;
@@ -280,4 +302,12 @@ export async function getHistory(limit = 50) {
 
 export async function searchVirtualFiles(query: string, sourceGroup: string | null, limit = 100) {
 	return invoke<VirtualFileMatch[]>('search_virtual_files_command', { query, sourceGroup, limit });
+}
+
+export async function extractXmlEntry(virtualPath: string, sourceGroup: string | null, outputDir: string) {
+	return invoke<XmlPreview>('extract_xml_entry_command', { virtualPath, sourceGroup, outputDir });
+}
+
+export async function repackXmlEntry(virtualPath: string, sourceGroup: string | null, modifiedPath: string, outputPath: string | null) {
+	return invoke<XmlRepackResult>('repack_xml_entry_command', { virtualPath, sourceGroup, modifiedPath, outputPath });
 }

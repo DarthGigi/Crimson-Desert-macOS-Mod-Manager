@@ -19,7 +19,7 @@ use error::{AppError, ErrorPayload};
 use game::{
     detect_packages_dir, inspect_game_install, launch_game, resolve_to_packages_dir, LaunchResult,
 };
-use models::{ApplyPreview, ApplyResult, DashboardData, ExtractPreview, ExtractResult, GameInstallInfo, HistoryEntry, ModKind, ModPatchSummary, ModRecord, PathcRepackResult, PathcSummary, ScanResult, StatusSummary, VirtualFileMatch};
+use models::{ApplyPreview, ApplyResult, DashboardData, ExtractPreview, ExtractResult, GameInstallInfo, HistoryEntry, ModKind, ModPatchSummary, ModRecord, PathcRepackResult, PathcSummary, ScanResult, StatusSummary, VirtualFileMatch, XmlPreview, XmlRepackResult};
 use tauri::{AppHandle, Manager, State};
 
 const SETTINGS_GAME_PATH: &str = "game_packages_path";
@@ -650,6 +650,75 @@ fn search_virtual_files_command(
 }
 
 #[tauri::command]
+fn extract_xml_entry_command(
+    virtual_path: String,
+    source_group: Option<String>,
+    output_dir: String,
+    state: State<'_, AppState>,
+) -> Result<XmlPreview, ErrorPayload> {
+    let _guard = state.operation_lock.lock().map_err(|_| ErrorPayload {
+        message: "Operation lock poisoned".to_string(),
+    })?;
+    let mut marker = OperationMarkerGuard::new(&state, "extract_xml_entry").map_err(ErrorPayload::from)?;
+    let connection = state.connection().map_err(ErrorPayload::from)?;
+    let packages_dir = saved_game_path(&connection)
+        .map_err(ErrorPayload::from)?
+        .ok_or_else(|| ErrorPayload {
+            message: "Set the Crimson Desert game path first.".to_string(),
+        })?;
+    let result = patcher::extract_xml_entry(&packages_dir, &virtual_path, source_group.as_deref(), Path::new(&output_dir))
+        .map_err(ErrorPayload::from)?;
+    insert_history(
+        &connection,
+        "extract_xml_entry",
+        "ok",
+        &format!("Extracted XML {} to {}", result.virtual_path, result.extracted_path),
+        None,
+    )
+    .map_err(ErrorPayload::from)?;
+    marker.clear().map_err(ErrorPayload::from)?;
+    Ok(result)
+}
+
+#[tauri::command]
+fn repack_xml_entry_command(
+    virtual_path: String,
+    source_group: Option<String>,
+    modified_path: String,
+    output_path: Option<String>,
+    state: State<'_, AppState>,
+) -> Result<XmlRepackResult, ErrorPayload> {
+    let _guard = state.operation_lock.lock().map_err(|_| ErrorPayload {
+        message: "Operation lock poisoned".to_string(),
+    })?;
+    let mut marker = OperationMarkerGuard::new(&state, "repack_xml_entry").map_err(ErrorPayload::from)?;
+    let connection = state.connection().map_err(ErrorPayload::from)?;
+    let packages_dir = saved_game_path(&connection)
+        .map_err(ErrorPayload::from)?
+        .ok_or_else(|| ErrorPayload {
+            message: "Set the Crimson Desert game path first.".to_string(),
+        })?;
+    let result = patcher::repack_xml_entry(
+        &packages_dir,
+        &virtual_path,
+        source_group.as_deref(),
+        Path::new(&modified_path),
+        output_path.as_deref().map(Path::new),
+    )
+    .map_err(ErrorPayload::from)?;
+    insert_history(
+        &connection,
+        "repack_xml_entry",
+        "ok",
+        &format!("Repacked XML {} ({} -> {} bytes)", result.virtual_path, result.target_comp_size, result.new_comp_size),
+        None,
+    )
+    .map_err(ErrorPayload::from)?;
+    marker.clear().map_err(ErrorPayload::from)?;
+    Ok(result)
+}
+
+#[tauri::command]
 fn get_history_command(
     limit: Option<usize>,
     state: State<'_, AppState>,
@@ -693,6 +762,8 @@ pub fn run() {
             extract_virtual_file_command,
             get_history_command,
             search_virtual_files_command,
+            extract_xml_entry_command,
+            repack_xml_entry_command,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

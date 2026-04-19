@@ -8,6 +8,7 @@ import {
 	getHistory,
 	getModPatchSummaries,
 	getPathcSummary,
+	extractXmlEntry,
 	searchVirtualFiles,
 	getVirtualFilePreview,
 	importModVariant,
@@ -26,6 +27,8 @@ import {
 	type PathcSummary,
 	type ScanResult,
 	type VirtualFileMatch,
+	type XmlPreview,
+	type XmlRepackResult,
 	fixEverything,
 	repackPathc,
 	resetActiveMods,
@@ -36,7 +39,8 @@ import {
 	setPatchEnabled,
 	setSelectedLanguage,
 	setModEnabled,
-	extractVirtualFile
+	extractVirtualFile,
+	repackXmlEntry,
 } from '$lib/desktop-api';
 
 export type ManagerMessage = {
@@ -52,6 +56,8 @@ class ManagerState {
 	pathcResult = $state<PathcRepackResult | null>(null);
 	extractPreview = $state<ExtractPreview | null>(null);
 	extractResult = $state<ExtractResult | null>(null);
+	xmlPreview = $state<XmlPreview | null>(null);
+	xmlRepackResult = $state<XmlRepackResult | null>(null);
 	historyEntries = $state<HistoryEntry[]>([]);
 	virtualFileMatches = $state<VirtualFileMatch[]>([]);
 	patchSummaries = $state<ModPatchSummary[]>([]);
@@ -77,6 +83,7 @@ class ManagerState {
 		repackingPathc: false,
 		extracting: false,
 		searchingFiles: false,
+		xml: false,
 		toggling: ''
 	});
 
@@ -565,6 +572,34 @@ class ManagerState {
 			this.setError(error, 'Could not search virtual files');
 		} finally {
 			this.busy.searchingFiles = false;
+		}
+	}
+
+	async extractXmlEntry(virtualPath: string, sourceGroup: string | null, outputDir: string) {
+		this.busy.xml = true;
+		this.clearMessage();
+		try {
+			this.xmlPreview = await extractXmlEntry(virtualPath, sourceGroup, outputDir);
+			await this.refreshHistory();
+			toast.success(`Extracted XML ${this.xmlPreview.virtualPath}.`);
+		} catch (error) {
+			this.setError(error, 'Could not extract XML entry');
+		} finally {
+			this.busy.xml = false;
+		}
+	}
+
+	async repackXmlEntry(virtualPath: string, sourceGroup: string | null, modifiedPath: string, outputPath: string | null) {
+		this.busy.xml = true;
+		this.clearMessage();
+		try {
+			this.xmlRepackResult = await repackXmlEntry(virtualPath, sourceGroup, modifiedPath, outputPath);
+			await this.refreshHistory();
+			toast.success(this.xmlRepackResult.patchedInPlace ? 'Patched XML entry in place.' : 'Prepared XML repack payload.');
+		} catch (error) {
+			this.setError(error, 'Could not repack XML entry');
+		} finally {
+			this.busy.xml = false;
 		}
 	}
 
