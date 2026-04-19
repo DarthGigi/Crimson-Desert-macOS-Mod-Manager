@@ -564,19 +564,7 @@ fn is_browser_raw_dir(root: &Path) -> bool {
         return false;
     };
 
-    let Ok(entries) = fs::read_dir(&files_dir) else {
-        return false;
-    };
-
-    entries.flatten().any(|entry| {
-        let path = entry.path();
-        path.is_dir()
-            && path
-                .file_name()
-                .and_then(|value| value.to_str())
-                .is_some_and(|name| name.len() == 4 && name.chars().all(|ch| ch.is_ascii_digit()))
-            && contains_any_files(&path)
-    })
+    contains_any_supported_files(&files_dir)
 }
 
 fn contains_asi_files(root: &Path) -> bool {
@@ -900,6 +888,7 @@ fn list_precompiled_groups(root: &Path) -> AppResult<Vec<String>> {
 fn list_browser_raw_groups(root: &Path) -> AppResult<(Vec<String>, usize)> {
     let mut groups = Vec::new();
     let mut total_files = 0usize;
+    let mut found_numeric = false;
 
     for entry in fs::read_dir(root)? {
         let entry = entry?;
@@ -915,9 +904,17 @@ fn list_browser_raw_groups(root: &Path) -> AppResult<(Vec<String>, usize)> {
         if name.len() == 4 && name.chars().all(|ch| ch.is_ascii_digit()) {
             let count = count_files_recursively(&path)?;
             if count > 0 {
+                found_numeric = true;
                 groups.push(name.to_string());
                 total_files += count;
             }
+        }
+    }
+
+    if !found_numeric {
+        total_files = count_supported_files_recursively(root)?;
+        if total_files > 0 {
+            groups.push("auto".to_string());
         }
     }
 
@@ -925,8 +922,8 @@ fn list_browser_raw_groups(root: &Path) -> AppResult<(Vec<String>, usize)> {
     Ok((groups, total_files))
 }
 
-fn contains_any_files(root: &Path) -> bool {
-    count_files_recursively(root).unwrap_or(0) > 0
+fn contains_any_supported_files(root: &Path) -> bool {
+	count_supported_files_recursively(root).unwrap_or(0) > 0
 }
 
 fn count_files_recursively(root: &Path) -> AppResult<usize> {
@@ -942,6 +939,25 @@ fn count_files_recursively(root: &Path) -> AppResult<usize> {
     }
 
     Ok(count)
+}
+
+fn count_supported_files_recursively(root: &Path) -> AppResult<usize> {
+	let mut count = 0usize;
+	for entry in fs::read_dir(root)? {
+		let entry = entry?;
+		let path = entry.path();
+		if path.is_dir() {
+			count += count_supported_files_recursively(&path)?;
+		} else if path.is_file()
+			&& !path
+				.file_name()
+				.and_then(|value| value.to_str())
+				.is_some_and(|name| name.starts_with('.'))
+		{
+			count += 1;
+		}
+	}
+	Ok(count)
 }
 
 fn copy_dir_all(source: &Path, destination: &Path) -> AppResult<()> {
@@ -1153,6 +1169,17 @@ mod tests {
         assert_eq!(record.mod_kind, ModKind::BrowserRaw);
         assert_eq!(record.name, "Better Inventory UI compatible with BTM");
         assert!(record.target_files.iter().any(|group| group == "0012"));
+        assert!(record.change_count > 0);
+    }
+
+    #[test]
+    fn browser_raw_manifest_without_numeric_group_is_detected() {
+        let browser_raw_mod = Path::new(DOWNLOADED_MODS_DIR).join("character_underwear");
+        let record = inspect_browser_raw_dir(&browser_raw_mod).unwrap();
+
+        assert_eq!(record.mod_kind, ModKind::BrowserRaw);
+        assert_eq!(record.name, "Character Underwear");
+        assert!(record.patch_count > 0);
         assert!(record.change_count > 0);
     }
 

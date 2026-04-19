@@ -7,6 +7,7 @@ use chacha20::ChaCha20Legacy;
 use lz4_flex::block;
 
 use crate::error::{AppError, AppResult};
+use crate::game::SOURCE_GROUP;
 use crate::models::{
     ApplyFileResult, ApplyPreview, ApplyPreviewFile, ApplyResult, ExtractPreview, ExtractResult,
     ManagedGroupRecord, ModChange, ModKind, ModRecord, VirtualFileMatch, XmlPreview,
@@ -1249,30 +1250,66 @@ fn install_browser_raw_mod(
     let source_root = Path::new(&record.library_path);
     let files_dir = resolve_browser_files_dir(source_root)?;
     let mut source_groups = Vec::new();
+    let has_numeric_groups = fs::read_dir(&files_dir)?
+        .filter_map(Result::ok)
+        .any(|entry| {
+            let path = entry.path();
+            path.is_dir()
+                && path
+                    .file_name()
+                    .and_then(|value| value.to_str())
+                    .is_some_and(|name| name.len() == 4 && name.chars().all(|ch| ch.is_ascii_digit()))
+        });
 
-    for entry in fs::read_dir(&files_dir)? {
-        let entry = entry?;
-        let path = entry.path();
-        if !path.is_dir() {
-            continue;
+    if has_numeric_groups {
+        for entry in fs::read_dir(&files_dir)? {
+            let entry = entry?;
+            let path = entry.path();
+            if !path.is_dir() {
+                continue;
+            }
+
+            let Some(name) = path.file_name().and_then(|value| value.to_str()) else {
+                continue;
+            };
+
+            if name.len() == 4 && name.chars().all(|ch| ch.is_ascii_digit()) {
+                source_groups.push(path);
+            }
+        }
+    }
+
+    if !has_numeric_groups {
+        let grouped_files = collect_loose_overlay_files_auto(&files_dir, game_dir)?;
+        if grouped_files.is_empty() {
+            return Err(AppError::InvalidMod(format!(
+                "{} does not contain any browser/raw source groups",
+                record.library_path
+            )));
         }
 
-        let Some(name) = path.file_name().and_then(|value| value.to_str()) else {
-            continue;
-        };
+        let mut created = Vec::new();
+        for (source_group, overlay_files) in grouped_files {
+            let target_group = format!("{:04}", *next_group);
+            *next_group += 1;
+            let target_dir = game_dir.join(&target_group);
+            fs::create_dir_all(&target_dir)?;
 
-        if name.len() == 4 && name.chars().all(|ch| ch.is_ascii_digit()) {
-            source_groups.push(path);
+            let (paz_bytes, pamt_bytes) = build_loose_overlay_archive(&overlay_files);
+            fs::write(target_dir.join("0.paz"), &paz_bytes)?;
+            fs::write(target_dir.join("0.pamt"), &pamt_bytes)?;
+
+            let pamt_crc = read_u32_le(&pamt_bytes, 0);
+            let new_papgt = build_papgt_with_mod(papgt_path, &target_group, pamt_crc)?;
+            fs::write(papgt_path, &new_papgt)?;
+            created.push(target_group);
+            let _ = source_group;
         }
+
+        return Ok(created);
     }
 
     source_groups.sort();
-    if source_groups.is_empty() {
-        return Err(AppError::InvalidMod(format!(
-            "{} does not contain any browser/raw source groups",
-            record.library_path
-        )));
-    }
 
     let mut created = Vec::new();
     for source_group in source_groups {
@@ -1297,6 +1334,38 @@ fn install_browser_raw_mod(
     }
 
     Ok(created)
+}
+
+fn collect_loose_overlay_files_auto(
+    root: &Path,
+    game_dir: &Path,
+) -> AppResult<BTreeMap<String, Vec<OverlayFileBytes>>> {
+    let mut files = Vec::new();
+    collect_loose_overlay_files_inner(root, root, &mut files)?;
+    let mut grouped = BTreeMap::<String, Vec<OverlayFileBytes>>::new();
+    let mut cache = BTreeMap::new();
+
+    for file in files {
+        let full_path = if file.dir_path.is_empty() {
+            file.filename.clone()
+        } else {
+            format!("{}/{}", file.dir_path, file.filename)
+        };
+
+        let mut resolved_group = None;
+        for group in source_group_candidates(game_dir, None)? {
+            let (simple_index, full_index) = load_group_indexes(game_dir, &group, &mut cache)?;
+            if resolve_game_file(&full_path, simple_index, full_index).is_some() {
+                resolved_group = Some(group);
+                break;
+            }
+        }
+
+        let group = resolved_group.unwrap_or_else(|| SOURCE_GROUP.to_string());
+        grouped.entry(group).or_default().push(file);
+    }
+
+    Ok(grouped)
 }
 
 fn resolve_browser_files_dir(root: &Path) -> AppResult<std::path::PathBuf> {
