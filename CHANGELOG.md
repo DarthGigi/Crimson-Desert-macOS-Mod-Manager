@@ -1,5 +1,11 @@
 # crimson-desert-macos-mod-manager
 
+## 0.1.4
+
+### Patch Changes
+
+- 628cd4c: Generate and upload `latest.json` in the GitHub release workflow so the in-app updater has a real static update feed to consume.
+
 ## 0.1.3
 
 ### Patch Changes
