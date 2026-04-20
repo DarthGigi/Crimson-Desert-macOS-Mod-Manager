@@ -1,6 +1,6 @@
 [package]
 name = "crimson-desert-macos-mod-manager"
-version = "0.1.4"
+version = "0.1.5"
 description = "A macOS mod manager for Crimson Desert with JSON, overlay, PATHC, and archive workflows."
 authors = ["Gigi"]
 edition = "2021"
