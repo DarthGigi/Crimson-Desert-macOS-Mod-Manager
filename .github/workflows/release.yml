@@ -100,7 +100,7 @@ jobs:
               }
             }
           }
-EOF
+          EOF
           echo "app_path=$APP_PATH" >> "$GITHUB_OUTPUT"
           echo "dmg_path=$DMG_PATH" >> "$GITHUB_OUTPUT"
           echo "stable_dmg=$STABLE_DMG" >> "$GITHUB_OUTPUT"
