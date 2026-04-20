@@ -81,17 +81,34 @@ jobs:
         run: |
           APP_PATH=$(find src-tauri/target/${{ matrix.target }}/release/bundle/macos -maxdepth 1 -name '*.app' -print -quit)
           DMG_PATH=$(find src-tauri/target/${{ matrix.target }}/release/bundle/dmg -maxdepth 1 -name '*.dmg' -print -quit)
-          LATEST_JSON=$(find src-tauri/target/${{ matrix.target }}/release/bundle -name 'latest.json' -print -quit)
-          UPDATER_ARTIFACTS=$(find src-tauri/target/${{ matrix.target }}/release/bundle -type f \( -name '*.tar.gz' -o -name '*.tar.gz.sig' \) -print)
+          TAR_PATH=$(find src-tauri/target/${{ matrix.target }}/release/bundle/macos -maxdepth 1 -name '*.app.tar.gz' -print -quit)
+          SIG_PATH=$(find src-tauri/target/${{ matrix.target }}/release/bundle/macos -maxdepth 1 -name '*.app.tar.gz.sig' -print -quit)
           STABLE_DMG=$(dirname "$DMG_PATH")/Crimson-Desert-Mod-Manager-macOS-arm64-latest.dmg
           cp "$DMG_PATH" "$STABLE_DMG"
+          LATEST_JSON=$(dirname "$DMG_PATH")/latest.json
+          APP_BASENAME=$(basename "$TAR_PATH")
+          SIG_CONTENT=$(cat "$SIG_PATH")
+          cat > "$LATEST_JSON" <<EOF
+          {
+            "version": "${{ steps.version.outputs.version }}",
+            "notes": "See the GitHub release notes for details.",
+            "pub_date": "$(date -u +%Y-%m-%dT%H:%M:%SZ)",
+            "platforms": {
+              "darwin-aarch64": {
+                "signature": "$SIG_CONTENT",
+                "url": "https://github.com/DarthGigi/Crimson-Desert-macOS-Mod-Manager/releases/download/v${{ steps.version.outputs.version }}/$APP_BASENAME"
+              }
+            }
+          }
+EOF
           echo "app_path=$APP_PATH" >> "$GITHUB_OUTPUT"
           echo "dmg_path=$DMG_PATH" >> "$GITHUB_OUTPUT"
           echo "stable_dmg=$STABLE_DMG" >> "$GITHUB_OUTPUT"
           echo "latest_json=$LATEST_JSON" >> "$GITHUB_OUTPUT"
           {
             echo 'updater_artifacts<<EOF'
-            echo "$UPDATER_ARTIFACTS"
+            echo "$TAR_PATH"
+            echo "$SIG_PATH"
             echo EOF
           } >> "$GITHUB_OUTPUT"
 
