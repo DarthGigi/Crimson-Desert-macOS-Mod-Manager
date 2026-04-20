@@ -1,5 +1,17 @@
 # crimson-desert-macos-mod-manager
 
+## 0.1.5
+
+### Patch Changes
+
+- 8c45103: Restrict the Changesets PR check to `dev` so release PRs from `dev` to `main` do not fail after changesets have already been consumed.
+
+## 0.1.4
+
+### Patch Changes
+
+- 628cd4c: Generate and upload `latest.json` in the GitHub release workflow so the in-app updater has a real static update feed to consume.
+
 ## 0.1.3
 
 ### Patch Changes

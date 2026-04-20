@@ -3,7 +3,6 @@ name: changeset-status
 on:
   pull_request:
     branches:
-      - main
       - dev
 
 jobs:
