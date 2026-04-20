@@ -1,5 +1,11 @@
 # crimson-desert-macos-mod-manager
 
+## 0.1.6
+
+### Patch Changes
+
+- 472569e: update icons
+
 ## 0.1.5
 
 ### Patch Changes
