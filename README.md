@@ -4,6 +4,9 @@
 
 <h1 align="center">Crimson Desert Mod Manager</h1>
 
+> [!WARNING]
+> This project is in early development and is not yet fully ready, you can use it at your own risk. Expect bugs, crashes, and missing features. Please help by testing and providing feedback!
+
 A macOS-native mod manager for **Crimson Desert** built with **Tauri**, **Svelte**, **TypeScript**, **Tailwind**, **shadcn-svelte**, and **Rust**.
 
 It supports JSON patch mods, precompiled overlays, browser/raw folder mods, archive imports, PATHC workflows, recovery tools, and advanced extraction utilities.
