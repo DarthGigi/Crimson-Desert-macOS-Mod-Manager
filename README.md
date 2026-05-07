@@ -1,3 +1,6 @@
+> [!WARNING]
+> This project is no longer being maintained, it has been deprecated by [DarthGigi/CrimsonDesert-UltimateModsManager](https://github.com/DarthGigi/CrimsonDesert-UltimateModsManager). For downloads, check out https://www.nexusmods.com/crimsondesert/mods/2253
+
 <p align="center">
   <img src="src-tauri/icons/app-icon.png" alt="Crimson Desert Mod Manager icon" width="160" height="160" />
 </p>
